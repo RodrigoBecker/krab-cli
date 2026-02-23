@@ -1,0 +1,69 @@
+[project]
+name = "krab-cli"
+version = "0.1.0"
+description = "Krab CLI — Spec-Driven Development toolkit: optimize, convert, and analyze specs for AI agents"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+authors = [{ name = "Becker", email = "becker@garagemdigital.dev" }]
+keywords = ["krab", "sdd", "spec-driven", "cli", "huffman", "fuzzy", "ai", "tokens"]
+
+dependencies = [
+    "typer>=0.12.0",
+    "rich>=13.7.0",
+    "pyyaml>=6.0.1",
+    "rapidfuzz>=3.6.0",
+    "tiktoken>=0.7.0",
+    "click>=8.1.0",
+]
+
+[project.scripts]
+krab = "krab_cli.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/krab_cli"]
+
+# ─── Ruff ────────────────────────────────────────────────────────────────
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "N",    # pep8-naming
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "SIM",  # flake8-simplify
+    "TCH",  # type-checking imports
+    "RUF",  # ruff-specific
+]
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["krab_cli"]
+
+# ─── Black ───────────────────────────────────────────────────────────────
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+# ─── isort ───────────────────────────────────────────────────────────────
+[tool.isort]
+profile = "black"
+line_length = 100
+known_first_party = ["krab_cli"]
+
+# ─── Pytest ──────────────────────────────────────────────────────────────
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-v --tb=short --color=yes"

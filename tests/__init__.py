@@ -1,0 +1,1 @@
+"""Krab CLI test suite."""
