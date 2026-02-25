@@ -39,6 +39,10 @@ agent_app = typer.Typer(
     no_args_is_help=True,
 )
 cache_app = typer.Typer(help="Manage analysis result cache", no_args_is_help=True)
+workflow_app = typer.Typer(
+    help="Run multi-step SDD workflows (spec-create, implement, review, full-cycle)",
+    no_args_is_help=True,
+)
 
 app.add_typer(optimize_app, name="optimize")
 app.add_typer(convert_app, name="convert")
@@ -49,6 +53,7 @@ app.add_typer(spec_app, name="spec")
 app.add_typer(memory_app, name="memory")
 app.add_typer(agent_app, name="agent")
 app.add_typer(cache_app, name="cache")
+app.add_typer(workflow_app, name="workflow")
 
 
 # ─── Version callback ────────────────────────────────────────────────────
@@ -511,10 +516,14 @@ def analyze_readability(
     print_metrics_table("Readability Scores", metrics)
     print_info(f"Recommendation: {report.recommendation}")
 
-    cache.put(text, "analyze_readability", {
-        "metrics": metrics,
-        "recommendation": report.recommendation,
-    })
+    cache.put(
+        text,
+        "analyze_readability",
+        {
+            "metrics": metrics,
+            "recommendation": report.recommendation,
+        },
+    )
 
 
 @analyze_app.command("ambiguity")
@@ -739,7 +748,10 @@ _BATCH_TYPES = ("tokens", "quality", "entropy", "readability")
 def analyze_batch(
     directory: Annotated[Path, typer.Argument(help="Directory containing spec files")],
     analysis: Annotated[
-        str, typer.Option("-a", "--analysis", help="Analysis type: tokens, quality, entropy, readability")
+        str,
+        typer.Option(
+            "-a", "--analysis", help="Analysis type: tokens, quality, entropy, readability"
+        ),
     ] = "tokens",
     pattern: Annotated[str, typer.Option("-p", "--pattern", help="Glob pattern")] = "*.md",
     context_window: Annotated[int, typer.Option("--context-window")] = 8192,
@@ -775,7 +787,9 @@ def analyze_batch(
     if analysis == "tokens":
         from krab_cli.core.tokens import estimate_cost, token_summary
 
-        table = Table(title=f"Token Analysis ({len(files)} files)", show_header=True, border_style="cyan")
+        table = Table(
+            title=f"Token Analysis ({len(files)} files)", show_header=True, border_style="cyan"
+        )
         table.add_column("File", style="bold", max_width=35)
         table.add_column("Chars", justify="right")
         table.add_column("Words", justify="right")
@@ -796,8 +810,14 @@ def analyze_batch(
                 c = estimate_cost(s["tokens"])
                 cache.put(text, "analyze_tokens", {"summary": s, "cost": c}, params)
             total_tokens += s["tokens"]
-            table.add_row(f.name, str(s["characters"]), str(s["words"]),
-                          str(s["tokens"]), f"{s['chars_per_token']:.1f}", f"${c['total_cost_usd']:.4f}")
+            table.add_row(
+                f.name,
+                str(s["characters"]),
+                str(s["words"]),
+                str(s["tokens"]),
+                f"{s['chars_per_token']:.1f}",
+                f"${c['total_cost_usd']:.4f}",
+            )
 
         get_console().print(table)
         print_info(f"Total tokens: {total_tokens:,}")
@@ -805,7 +825,9 @@ def analyze_batch(
     elif analysis == "quality":
         from krab_cli.core.similarity import context_quality_score
 
-        table = Table(title=f"Quality Analysis ({len(files)} files)", show_header=True, border_style="cyan")
+        table = Table(
+            title=f"Quality Analysis ({len(files)} files)", show_header=True, border_style="cyan"
+        )
         table.add_column("File", style="bold", max_width=35)
         table.add_column("Words", justify="right")
         table.add_column("Tokens", justify="right")
@@ -823,16 +845,24 @@ def analyze_batch(
             else:
                 q = context_quality_score(text, context_window)
                 cache.put(text, "analyze_quality", q, params)
-            table.add_row(f.name, str(q["word_count"]), str(q["estimated_tokens"]),
-                          f"{q['utilization_pct']:.1f}", f"{q['information_density']:.3f}",
-                          f"{q['redundancy_ratio']:.3f}", q["density_grade"])
+            table.add_row(
+                f.name,
+                str(q["word_count"]),
+                str(q["estimated_tokens"]),
+                f"{q['utilization_pct']:.1f}",
+                f"{q['information_density']:.3f}",
+                f"{q['redundancy_ratio']:.3f}",
+                q["density_grade"],
+            )
 
         get_console().print(table)
 
     elif analysis == "entropy":
         from krab_cli.core.entropy import full_entropy_analysis
 
-        table = Table(title=f"Entropy Analysis ({len(files)} files)", show_header=True, border_style="cyan")
+        table = Table(
+            title=f"Entropy Analysis ({len(files)} files)", show_header=True, border_style="cyan"
+        )
         table.add_column("File", style="bold", max_width=35)
         table.add_column("Entropy", justify="right", style="metric")
         table.add_column("Grade", justify="center")
@@ -855,16 +885,25 @@ def analyze_batch(
                     "Vocabulary Richness": report.vocabulary_richness,
                 }
                 cache.put(text, "analyze_entropy", {"metrics": m, "patterns": []})
-            table.add_row(f.name, f"{m['Shannon Entropy (bits)']:.2f}", m["Entropy Grade"],
-                          f"{m['Perplexity']:.1f}", f"{m['Markov Predictability']:.3f}",
-                          f"{m['Vocabulary Richness']:.3f}")
+            table.add_row(
+                f.name,
+                f"{m['Shannon Entropy (bits)']:.2f}",
+                m["Entropy Grade"],
+                f"{m['Perplexity']:.1f}",
+                f"{m['Markov Predictability']:.3f}",
+                f"{m['Vocabulary Richness']:.3f}",
+            )
 
         get_console().print(table)
 
     elif analysis == "readability":
         from krab_cli.core.readability import full_readability_analysis
 
-        table = Table(title=f"Readability Analysis ({len(files)} files)", show_header=True, border_style="cyan")
+        table = Table(
+            title=f"Readability Analysis ({len(files)} files)",
+            show_header=True,
+            border_style="cyan",
+        )
         table.add_column("File", style="bold", max_width=35)
         table.add_column("FK Grade", justify="right", style="metric")
         table.add_column("Ease", justify="right")
@@ -886,9 +925,19 @@ def analyze_batch(
                     "ARI Score": report.ari,
                     "Overall Grade": report.overall_grade,
                 }
-                cache.put(text, "analyze_readability", {"metrics": m, "recommendation": report.recommendation})
-            table.add_row(f.name, f"{m['Flesch-Kincaid Grade']:.1f}", f"{m['Flesch Reading Ease']:.1f}",
-                          f"{m['Gunning Fog Index']:.1f}", f"{m['ARI Score']:.1f}", m["Overall Grade"])
+                cache.put(
+                    text,
+                    "analyze_readability",
+                    {"metrics": m, "recommendation": report.recommendation},
+                )
+            table.add_row(
+                f.name,
+                f"{m['Flesch-Kincaid Grade']:.1f}",
+                f"{m['Flesch Reading Ease']:.1f}",
+                f"{m['Gunning Fog Index']:.1f}",
+                f"{m['ARI Score']:.1f}",
+                m["Overall Grade"],
+            )
 
         get_console().print(table)
 
@@ -1526,8 +1575,12 @@ def agent_sync(
         str,
         typer.Argument(help="Agent target: all, claude, copilot, codex"),
     ] = "all",
+    no_commands: Annotated[
+        bool,
+        typer.Option("--no-commands", help="Skip slash command generation"),
+    ] = False,
 ) -> None:
-    """Generate instruction files for AI agents from SDD memory + specs."""
+    """Generate instruction files + native slash commands for AI agents."""
     from krab_cli.agents import sync_agent, sync_all
     from krab_cli.utils.display import print_error, print_header, print_info, print_success
 
@@ -1540,15 +1593,31 @@ def agent_sync(
                 for p in paths:
                     print_success(f"[{agent_name}] {p}")
             total = sum(len(v) for v in results.values())
-            print_info(f"Generated {total} files for {len(results)} agents")
+            print_info(f"Generated {total} instruction files for {len(results)} agents")
         else:
             paths = sync_agent(target)
             for p in paths:
                 print_success(f"[{target}] {p}")
-            print_info(f"Generated {len(paths)} file(s) for {target}")
+            print_info(f"Generated {len(paths)} instruction file(s) for {target}")
     except ValueError as e:
         print_error(str(e))
         raise typer.Exit(code=1) from e
+
+    # Also generate native slash commands
+    if not no_commands:
+        from krab_cli.workflows.commands import generate_all as gen_commands
+
+        try:
+            agent_filter = None if target == "all" else target
+            cmd_results = gen_commands(root=Path.cwd(), agent=agent_filter)
+            cmd_total = sum(len(v) for v in cmd_results.values())
+            if cmd_total:
+                for agent_name, paths in cmd_results.items():
+                    for p in paths:
+                        print_success(f"[{agent_name}/cmd] {p}")
+                print_info(f"Generated {cmd_total} slash command files")
+        except ValueError:
+            pass  # Agent not supported for commands (e.g. codex) — skip silently
 
 
 @agent_app.command("preview")
@@ -1692,15 +1761,348 @@ def cache_stats() -> None:
 
     print_header("Cache Statistics")
     st = cache.stats()
-    print_metrics_table("Cache", {
-        "Entries": st["entries"],
-        "Disk Usage": st["size_human"],
-    })
+    print_metrics_table(
+        "Cache",
+        {
+            "Entries": st["entries"],
+            "Disk Usage": st["size_human"],
+        },
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# WORKFLOW commands — Multi-step SDD pipelines
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@workflow_app.command("list")
+def workflow_list() -> None:
+    """List all available workflows (built-in + custom)."""
+    from rich.table import Table
+
+    from krab_cli.utils.display import get_console, print_header
+    from krab_cli.workflows import list_custom_workflows
+    from krab_cli.workflows.builtins import list_builtins
+
+    print_header("Workflows", "Built-in + custom")
+
+    table = Table(show_header=True, border_style="cyan")
+    table.add_column("Name", style="bold yellow", min_width=15)
+    table.add_column("Steps", justify="right", width=6)
+    table.add_column("Type", width=10)
+    table.add_column("Description")
+
+    for wf in list_builtins():
+        table.add_row(
+            str(wf["name"]),
+            str(wf["steps"]),
+            "[green]built-in[/green]",
+            str(wf["description"]),
+        )
+
+    for path in list_custom_workflows():
+        try:
+            from krab_cli.workflows import Workflow
+
+            w = Workflow.load(path)
+            table.add_row(w.name, str(len(w.steps)), "[cyan]custom[/cyan]", w.description)
+        except Exception:
+            table.add_row(path.stem, "?", "[red]error[/red]", f"Failed to load: {path.name}")
+
+    get_console().print(table)
+
+
+@workflow_app.command("show")
+def workflow_show(
+    name: Annotated[str, typer.Argument(help="Workflow name (built-in or custom)")],
+) -> None:
+    """Show the steps of a specific workflow."""
+    from rich.table import Table
+
+    from krab_cli.utils.display import get_console, print_error, print_header
+
+    wf = _resolve_workflow(name)
+    if not wf:
+        print_error(f"Workflow not found: '{name}'")
+        raise typer.Exit(code=1)
+
+    print_header(f"Workflow: {wf.name}", wf.description)
+
+    table = Table(show_header=True, border_style="cyan")
+    table.add_column("#", style="dim", width=4)
+    table.add_column("Step", style="bold yellow", min_width=18)
+    table.add_column("Type", width=8)
+    table.add_column("Command / Prompt", max_width=55)
+    table.add_column("On Fail", width=10)
+
+    for i, step in enumerate(wf.steps, 1):
+        detail = step.command or step.prompt or step.condition
+        if len(detail) > 55:
+            detail = detail[:52] + "..."
+
+        fail_style = "[green]continue[/green]" if step.on_failure.value == "continue" else "stop"
+
+        table.add_row(str(i), step.name, step.type.value, detail, fail_style)
+
+    get_console().print(table)
+    get_console().print(f"\n[dim]Default agent: {wf.default_agent}[/dim]")
+
+
+@workflow_app.command("run")
+def workflow_run(
+    name: Annotated[str, typer.Argument(help="Workflow name")],
+    spec: Annotated[str, typer.Option("--spec", "-s", help="Spec file path")] = "",
+    agent: Annotated[str, typer.Option("--agent", "-a", help="Agent: claude, codex, copilot")] = "",
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Preview without executing")] = False,
+) -> None:
+    """Execute a workflow pipeline."""
+
+    from krab_cli.utils.display import (
+        get_console,
+        print_error,
+        print_header,
+        print_success,
+    )
+    from krab_cli.workflows import StepResult as WfStepResult
+    from krab_cli.workflows import WorkflowRunner, WorkflowStep
+
+    wf = _resolve_workflow(name)
+    if not wf:
+        print_error(f"Workflow not found: '{name}'")
+        raise typer.Exit(code=1)
+
+    mode = "[yellow]DRY RUN[/yellow]" if dry_run else "[green]LIVE[/green]"
+    print_header(
+        f"Workflow: {wf.name}",
+        f"{mode}  spec={spec or '(none)'}  agent={agent or wf.default_agent}",
+    )
+
+    step_results: list[tuple[WorkflowStep, WfStepResult]] = []
+
+    def on_step(step: WorkflowStep, result: WfStepResult) -> None:
+        step_results.append((step, result))
+        icon = "[green]OK[/green]" if result.success else "[red]FAIL[/red]"
+        if result.skipped:
+            icon = "[yellow]SKIP[/yellow]"
+        get_console().print(f"  {icon}  {step.name}: {result.output or result.error or 'done'}")
+
+    runner = WorkflowRunner(
+        spec=spec,
+        agent=agent,
+        dry_run=dry_run,
+        on_step=on_step,
+    )
+
+    result = runner.run(wf)
+
+    # Summary
+    get_console().print()
+    if result.success:
+        print_success(
+            f"Workflow '{wf.name}' completed: "
+            f"{result.completed_count} passed, {result.skipped_count} skipped"
+        )
+    else:
+        print_error(
+            f"Workflow '{wf.name}' failed: "
+            f"{result.completed_count} passed, {result.failed_count} failed, "
+            f"{result.skipped_count} skipped"
+        )
+        raise typer.Exit(code=1)
+
+
+@workflow_app.command("new")
+def workflow_new(
+    name: Annotated[str, typer.Argument(help="Workflow name")],
+    desc: Annotated[str, typer.Option("--desc", "-d", help="Description")] = "",
+) -> None:
+    """Create a new custom workflow YAML template."""
+    from krab_cli.utils.display import print_info, print_success
+    from krab_cli.workflows import OnFailure, StepType, Workflow, WorkflowStep, get_workflows_dir
+
+    wf_dir = get_workflows_dir()
+    wf_dir.mkdir(parents=True, exist_ok=True)
+
+    template = Workflow(
+        name=name,
+        description=desc or f"Custom workflow: {name}",
+        default_agent="claude",
+        steps=[
+            WorkflowStep(
+                name="check-spec",
+                type=StepType.GATE,
+                condition="file_exists:{spec}",
+            ),
+            WorkflowStep(
+                name="analyze",
+                type=StepType.KRAB,
+                command="analyze risk {spec}",
+                on_failure=OnFailure.CONTINUE,
+            ),
+            WorkflowStep(
+                name="implement",
+                type=StepType.AGENT,
+                agent="{agent}",
+                prompt="Implement the changes described in the specification.",
+            ),
+        ],
+    )
+
+    out_path = wf_dir / f"{name}.yaml"
+    template.save(out_path)
+    print_success(f"Created workflow template: {out_path}")
+    print_info("Edit the YAML file to customize the workflow steps.")
+
+
+@workflow_app.command("export")
+def workflow_export(
+    name: Annotated[str, typer.Argument(help="Built-in workflow name to export")],
+) -> None:
+    """Export a built-in workflow as YAML to stdout."""
+    from krab_cli.utils.display import get_console, print_error
+    from krab_cli.workflows.builtins import get_builtin
+
+    try:
+        wf = get_builtin(name)
+    except ValueError as e:
+        print_error(str(e))
+        raise typer.Exit(code=1) from e
+
+    get_console().print(wf.to_yaml())
+
+
+@workflow_app.command("agents-check")
+def workflow_agents_check() -> None:
+    """Check which AI agent CLIs are installed and available."""
+    from rich.table import Table
+
+    from krab_cli.utils.display import get_console, print_header
+    from krab_cli.workflows.executor import list_agents
+
+    print_header("Agent Availability", "CLI tools in PATH")
+
+    table = Table(show_header=True, border_style="cyan")
+    table.add_column("Agent", style="bold", min_width=18)
+    table.add_column("Command", width=12)
+    table.add_column("Status", width=12)
+    table.add_column("Description")
+
+    for agent in list_agents():
+        status = "[green]installed[/green]" if agent["available"] else "[red]not found[/red]"
+        table.add_row(
+            str(agent["name"]),
+            str(agent["command"]),
+            status,
+            str(agent["description"]),
+        )
+
+    get_console().print(table)
+
+
+@workflow_app.command("commands")
+def workflow_commands(
+    agent: Annotated[
+        str,
+        typer.Option("--agent", "-a", help="Agent: claude, copilot (default: all)"),
+    ] = "",
+    workflow: Annotated[
+        str,
+        typer.Option("--workflow", "-w", help="Specific workflow name (default: all)"),
+    ] = "",
+    do_preview: Annotated[
+        bool,
+        typer.Option("--preview", help="Preview without writing files"),
+    ] = False,
+    do_clean: Annotated[
+        bool,
+        typer.Option("--clean", help="Remove all generated command files"),
+    ] = False,
+) -> None:
+    """Generate native slash commands for AI agents from krab workflows."""
+    from krab_cli.utils.display import (
+        get_console,
+        print_error,
+        print_header,
+        print_info,
+        print_success,
+    )
+    from krab_cli.workflows.commands import clean, generate_all, preview
+
+    if do_clean:
+        print_header("Workflow Commands", "Cleaning generated files")
+        removed = clean(root=Path.cwd())
+        if removed:
+            for p in removed:
+                print_info(f"Removed: {p}")
+            print_success(f"Cleaned {len(removed)} file(s)")
+        else:
+            print_info("No generated command files found")
+        return
+
+    agent_filter = agent or None
+    wf_filter = workflow or None
+
+    if do_preview:
+        from rich.panel import Panel
+        from rich.syntax import Syntax
+
+        print_header("Workflow Commands", "Preview (no files written)")
+        try:
+            results = preview(root=Path.cwd(), agent=agent_filter, workflow=wf_filter)
+        except ValueError as e:
+            print_error(str(e))
+            raise typer.Exit(code=1) from e
+
+        for agent_name, files in results.items():
+            for path, content in files:
+                syntax = Syntax(content, "markdown", theme="monokai", line_numbers=False)
+                get_console().print(
+                    Panel(syntax, title=f"[{agent_name}] {path}", border_style="cyan")
+                )
+        total = sum(len(v) for v in results.values())
+        print_info(f"Would generate {total} file(s)")
+        return
+
+    print_header("Workflow Commands", "Generating native slash commands")
+    try:
+        results = generate_all(root=Path.cwd(), agent=agent_filter, workflow=wf_filter)
+    except ValueError as e:
+        print_error(str(e))
+        raise typer.Exit(code=1) from e
+
+    for agent_name, paths in results.items():
+        for p in paths:
+            print_success(f"[{agent_name}] {p}")
+
+    total = sum(len(v) for v in results.values())
+    print_info(f"Generated {total} slash command file(s)")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Helpers
 # ═══════════════════════════════════════════════════════════════════════════
+
+
+def _resolve_workflow(name: str):
+    """Resolve a workflow by name: try built-in first, then custom YAML."""
+    from krab_cli.workflows import Workflow, list_custom_workflows
+    from krab_cli.workflows.builtins import get_builtin
+
+    # Try built-in
+    try:
+        return get_builtin(name)
+    except ValueError:
+        pass
+
+    # Try custom
+    for path in list_custom_workflows():
+        if path.stem == name:
+            try:
+                return Workflow.load(path)
+            except Exception:
+                return None
+
+    return None
 
 
 def _check_file(path: Path) -> None:
