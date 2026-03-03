@@ -33,6 +33,10 @@ spec_app = typer.Typer(
     help="Generate specs from templates (task, architecture, plan, skill, refine)",
     no_args_is_help=True,
 )
+registry_app = typer.Typer(
+    help="Manage spec registry — save remote Git repo URLs as aliases",
+    no_args_is_help=True,
+)
 memory_app = typer.Typer(help="Manage project memory (.sdd/)", no_args_is_help=True)
 agent_app = typer.Typer(
     help="Generate instruction files for AI agents (Claude Code, Copilot, Codex)",
@@ -50,6 +54,7 @@ app.add_typer(analyze_app, name="analyze")
 app.add_typer(search_app, name="search")
 app.add_typer(diff_app, name="diff")
 app.add_typer(spec_app, name="spec")
+spec_app.add_typer(registry_app, name="registry")
 app.add_typer(memory_app, name="memory")
 app.add_typer(agent_app, name="agent")
 app.add_typer(cache_app, name="cache")
@@ -1342,6 +1347,285 @@ def spec_list() -> None:
             f'krab spec new {t["type"]} -n "nome"',
             t["description"],
         )
+
+    get_console().print(table)
+
+
+# ── Spec Import ──────────────────────────────────────────────────────────
+
+
+@spec_app.command("import")
+def spec_import(
+    source: Annotated[
+        str, typer.Argument(help="Git repo URL or registry alias")
+    ],
+    branch: Annotated[str, typer.Option("--branch", "-b", help="Branch/tag/ref")] = "",
+    path: Annotated[str, typer.Option("--path", "-p", help="Subdirectory inside repo")] = "",
+    all_specs: Annotated[
+        bool, typer.Option("--all", "-a", help="Import all specs without prompting")
+    ] = False,
+    force: Annotated[
+        bool, typer.Option("--force", "-f", help="Overwrite existing specs")
+    ] = False,
+    output: Annotated[
+        Path | None, typer.Option("--output", "-o", help="Output directory")
+    ] = None,
+) -> None:
+    """Import specs from a remote Git repository."""
+    import shutil
+    import subprocess
+    import tempfile
+
+    from krab_cli.memory import SPECS_DIR, MemoryStore
+    from krab_cli.utils.display import (
+        get_console,
+        print_error,
+        print_header,
+        print_info,
+        print_success,
+        print_warning,
+    )
+
+    store = MemoryStore()
+    url = source
+    search_path = path
+
+    # ── Resolve registry alias ────────────────────────────────────
+    is_url = source.startswith(("http://", "https://", "git@", "ssh://"))
+    is_path = source.startswith(("/", ".", "~")) or Path(source).exists()
+    if not is_url and not is_path:
+        if not store.is_initialized:
+            print_error(
+                f"'{source}' nao e uma URL Git. "
+                "Para usar aliases, inicialize o projeto: `krab memory init`"
+            )
+            raise typer.Exit(code=1)
+        registries = store.load_registries()
+        if source not in registries:
+            print_error(
+                f"Registry '{source}' nao encontrado. "
+                "Use `krab spec registry list` para ver registries disponiveis."
+            )
+            raise typer.Exit(code=1)
+        reg = registries[source]
+        url = reg.url
+        if not search_path and reg.path:
+            search_path = reg.path
+        if not branch and reg.branch:
+            branch = reg.branch
+
+    print_header("Spec Import", url)
+
+    # ── Clone repo ────────────────────────────────────────────────
+    tmpdir = tempfile.mkdtemp(prefix="krab-import-")
+    try:
+        clone_cmd = ["git", "clone", "--depth", "1"]
+        if branch:
+            clone_cmd.extend(["--branch", branch])
+        clone_cmd.extend([url, tmpdir])
+
+        result = subprocess.run(
+            clone_cmd,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if result.returncode != 0:
+            stderr = result.stderr.strip()
+            print_error(f"Falha ao clonar repositorio: {stderr}")
+            raise typer.Exit(code=1)
+
+        print_info(f"Repositorio clonado: {url}" + (f" (branch: {branch})" if branch else ""))
+
+        # ── Find specs ────────────────────────────────────────────
+        repo_root = Path(tmpdir)
+        spec_files: list[Path] = []
+
+        if search_path:
+            # User-specified path
+            scan_dir = repo_root / search_path
+            if scan_dir.is_dir():
+                spec_files = sorted(scan_dir.glob("spec.*.md"))
+        else:
+            # Auto-detect: try .sdd/specs/ first, then scan entire repo
+            sdd_specs = repo_root / ".sdd" / "specs"
+            if sdd_specs.is_dir():
+                spec_files = sorted(sdd_specs.glob("spec.*.md"))
+            if not spec_files:
+                spec_files = sorted(repo_root.rglob("spec.*.md"))
+                # Exclude .git directory
+                spec_files = [f for f in spec_files if ".git" not in f.parts]
+
+        if not spec_files:
+            print_warning(
+                "Nenhuma spec encontrada"
+                + (f" em '{search_path}'" if search_path else " no repositorio")
+            )
+            raise typer.Exit(code=0)
+
+        # ── Display found specs ───────────────────────────────────
+        from rich.table import Table
+
+        table = Table(show_header=True, border_style="cyan", title="Specs encontradas")
+        table.add_column("#", style="dim", width=4)
+        table.add_column("Spec", style="bold yellow")
+        table.add_column("Path", style="dim")
+        table.add_column("Size", style="cyan", justify="right")
+
+        for i, spec in enumerate(spec_files, 1):
+            rel = spec.relative_to(repo_root)
+            size_kb = spec.stat().st_size / 1024
+            table.add_row(str(i), spec.name, str(rel.parent), f"{size_kb:.1f} KB")
+
+        get_console().print(table)
+
+        # ── Selection ─────────────────────────────────────────────
+        if all_specs:
+            selected = spec_files
+        else:
+            raw = typer.prompt(
+                f"\nImportar quais specs? (1-{len(spec_files)}, separados por virgula, ou 'all')"
+            )
+            raw = raw.strip()
+            if raw.lower() == "all":
+                selected = spec_files
+            else:
+                indices: list[int] = []
+                for part in raw.split(","):
+                    part = part.strip()
+                    if part.isdigit():
+                        idx = int(part)
+                        if 1 <= idx <= len(spec_files):
+                            indices.append(idx - 1)
+                if not indices:
+                    print_warning("Nenhuma spec selecionada.")
+                    raise typer.Exit(code=0)
+                selected = [spec_files[i] for i in indices]
+
+        # ── Copy specs ────────────────────────────────────────────
+        dest_dir = output or Path(SPECS_DIR)
+        dest_dir.mkdir(parents=True, exist_ok=True)
+
+        imported: list[str] = []
+        skipped: list[str] = []
+
+        for spec in selected:
+            dest = dest_dir / spec.name
+            if dest.exists() and not force:
+                print_warning(f"{spec.name} ja existe. Use --force para sobrescrever.")
+                skipped.append(spec.name)
+                continue
+            shutil.copy2(spec, dest)
+            imported.append(spec.name)
+
+        # ── Record in history ─────────────────────────────────────
+        if store.is_initialized and imported:
+            for name in imported:
+                store.add_history_entry(
+                    {
+                        "action": "spec_import",
+                        "source": source,
+                        "url": url,
+                        "file": str(dest_dir / name),
+                    }
+                )
+
+        # ── Summary ───────────────────────────────────────────────
+        if imported:
+            print_success(f"Importadas {len(imported)} specs de {source}")
+            for name in imported:
+                print_info(f"{name} -> {dest_dir / name}")
+        if skipped:
+            print_warning(f"{len(skipped)} specs ignoradas (ja existem)")
+
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+# ── Spec Registry ────────────────────────────────────────────────────────
+
+
+@registry_app.command("add")
+def registry_add(
+    name: Annotated[str, typer.Argument(help="Alias for this registry")],
+    url: Annotated[str, typer.Argument(help="Git repository URL")],
+    path: Annotated[str, typer.Option("--path", "-p", help="Default subdirectory")] = "",
+    branch: Annotated[str, typer.Option("--branch", "-b", help="Default branch/tag")] = "",
+) -> None:
+    """Add a remote spec repository to the registry."""
+    from krab_cli.memory import MemoryStore
+    from krab_cli.utils.display import print_error, print_info, print_success
+
+    store = MemoryStore()
+    if not store.is_initialized:
+        print_error("Projeto nao inicializado. Use `krab memory init` primeiro.")
+        raise typer.Exit(code=1)
+
+    registries = store.load_registries()
+    existed = name in registries
+    registry = store.add_registry(name, url, path, branch)
+
+    if existed:
+        print_success(f"Registry '{name}' atualizado")
+    else:
+        print_success(f"Registry '{name}' adicionado")
+    print_info(f"URL: {registry.url}")
+    if registry.path:
+        print_info(f"Path: {registry.path}")
+    if registry.branch:
+        print_info(f"Branch: {registry.branch}")
+
+
+@registry_app.command("remove")
+def registry_remove(
+    name: Annotated[str, typer.Argument(help="Registry alias to remove")],
+) -> None:
+    """Remove a spec repository from the registry."""
+    from krab_cli.memory import MemoryStore
+    from krab_cli.utils.display import print_error, print_success
+
+    store = MemoryStore()
+    if not store.is_initialized:
+        print_error("Projeto nao inicializado. Use `krab memory init` primeiro.")
+        raise typer.Exit(code=1)
+
+    try:
+        store.remove_registry(name)
+        print_success(f"Registry '{name}' removido")
+    except ValueError as e:
+        print_error(str(e))
+        raise typer.Exit(code=1) from e
+
+
+@registry_app.command("list")
+def registry_list() -> None:
+    """List all saved spec registries."""
+    from rich.table import Table
+
+    from krab_cli.memory import MemoryStore
+    from krab_cli.utils.display import get_console, print_error, print_header, print_info
+
+    store = MemoryStore()
+    if not store.is_initialized:
+        print_error("Projeto nao inicializado. Use `krab memory init` primeiro.")
+        raise typer.Exit(code=1)
+
+    registries = store.load_registries()
+
+    print_header("Spec Registries", f"{len(registries)} registries")
+
+    if not registries:
+        print_info("Nenhum registry cadastrado. Use `krab spec registry add` para adicionar.")
+        return
+
+    table = Table(show_header=True, border_style="cyan")
+    table.add_column("Name", style="bold yellow", min_width=12)
+    table.add_column("URL", style="green")
+    table.add_column("Path", style="dim")
+    table.add_column("Branch", style="dim")
+
+    for reg in registries.values():
+        table.add_row(reg.name, reg.url, reg.path or "-", reg.branch or "-")
 
     get_console().print(table)
 

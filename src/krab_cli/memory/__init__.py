@@ -17,6 +17,31 @@ MEMORY_FILE = "memory.json"
 SKILLS_FILE = "skills.json"
 HISTORY_FILE = "history.json"
 SPECS_DIR = ".sdd/specs"
+REGISTRIES_FILE = "registries.json"
+
+
+@dataclass
+class SpecRegistry:
+    """A saved reference to a remote Git repository containing specs."""
+
+    name: str
+    url: str
+    path: str = ""  # subdirectory inside the repo to search for specs
+    branch: str = ""  # branch/tag/ref (default: repo default branch)
+    added_at: str = ""
+
+    def to_dict(self) -> dict[str, str]:
+        return {k: v for k, v in asdict(self).items() if v}
+
+    @classmethod
+    def from_dict(cls, data: dict[str, str]) -> SpecRegistry:
+        return cls(
+            name=data.get("name", ""),
+            url=data.get("url", ""),
+            path=data.get("path", ""),
+            branch=data.get("branch", ""),
+            added_at=data.get("added_at", ""),
+        )
 
 
 @dataclass
@@ -240,3 +265,47 @@ class MemoryStore:
     def _save_history(self, history: list[dict]) -> None:
         path = self.sdd_path / HISTORY_FILE
         path.write_text(json.dumps(history, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    # ── Registries ────────────────────────────────────────────────────
+
+    def load_registries(self) -> dict[str, SpecRegistry]:
+        """Load spec registries from disk."""
+        path = self.sdd_path / REGISTRIES_FILE
+        if not path.exists():
+            return {}
+
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return {name: SpecRegistry.from_dict({**entry, "name": name}) for name, entry in data.items()}
+
+    def save_registries(self, registries: dict[str, SpecRegistry]) -> None:
+        """Save spec registries to disk."""
+        data = {name: reg.to_dict() for name, reg in registries.items()}
+        # Remove 'name' from each entry — it's the dict key
+        for entry in data.values():
+            entry.pop("name", None)
+        path = self.sdd_path / REGISTRIES_FILE
+        path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    def add_registry(
+        self, name: str, url: str, path: str = "", branch: str = ""
+    ) -> SpecRegistry:
+        """Add or update a spec registry."""
+        registries = self.load_registries()
+        registry = SpecRegistry(
+            name=name,
+            url=url,
+            path=path,
+            branch=branch,
+            added_at=datetime.now(tz=UTC).isoformat(),
+        )
+        registries[name] = registry
+        self.save_registries(registries)
+        return registry
+
+    def remove_registry(self, name: str) -> None:
+        """Remove a spec registry by name."""
+        registries = self.load_registries()
+        if name not in registries:
+            raise ValueError(f"Registry '{name}' nao encontrado")
+        del registries[name]
+        self.save_registries(registries)
