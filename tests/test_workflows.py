@@ -141,8 +141,8 @@ class TestWorkflow:
 
 class TestResolveVariables:
     def test_basic_substitution(self):
-        result = resolve_variables("analyze risk {spec}", {"spec": "spec.task.auth.md"})
-        assert result == "analyze risk spec.task.auth.md"
+        result = resolve_variables("analyze risk {spec}", {"spec": ".sdd/specs/spec.task.auth.md"})
+        assert result == "analyze risk .sdd/specs/spec.task.auth.md"
 
     def test_multiple_variables(self):
         result = resolve_variables(
@@ -658,7 +658,7 @@ class TestBuiltinWorkflows:
         from krab_cli.workflows.builtins import get_builtin
 
         wf = get_builtin("full-cycle")
-        assert len(wf.steps) == 8
+        assert len(wf.steps) == 9
         step_types = [s.type for s in wf.steps]
         assert StepType.AGENT in step_types
         assert StepType.KRAB in step_types
@@ -674,6 +674,80 @@ class TestBuiltinWorkflows:
                 assert step.on_failure == OnFailure.CONTINUE, (
                     f"Step '{step.name}' in verify should have on_failure=continue"
                 )
+
+    def test_spec_create_has_enrich_step(self):
+        """enrich-spec must sit between create-spec and refine-spec."""
+        from krab_cli.workflows.builtins import get_builtin
+
+        wf = get_builtin("spec-create")
+        names = [s.name for s in wf.steps]
+        assert "enrich-spec" in names
+        idx = names.index("enrich-spec")
+        assert names[idx - 1] == "create-spec"
+        assert names[idx + 1] == "refine-spec"
+
+    def test_enrich_step_is_agent_type(self):
+        """enrich-spec must be AGENT type with [mode:enrich] prefix."""
+        from krab_cli.workflows.builtins import get_builtin
+
+        wf = get_builtin("spec-create")
+        enrich = next(s for s in wf.steps if s.name == "enrich-spec")
+        assert enrich.type == StepType.AGENT
+        assert enrich.prompt.startswith("[mode:enrich]")
+
+    def test_full_cycle_has_enrich_step(self):
+        """full-cycle must also contain enrich-spec between create and refine."""
+        from krab_cli.workflows.builtins import get_builtin
+
+        wf = get_builtin("full-cycle")
+        names = [s.name for s in wf.steps]
+        assert "enrich-spec" in names
+        idx = names.index("enrich-spec")
+        assert names[idx - 1] == "create-spec"
+        assert names[idx + 1] == "refine-spec"
+
+
+class TestEnrichMode:
+    def test_build_agent_prompt_enrich_mode(self):
+        """Enrich mode must produce pt-BR rewrite instructions."""
+        from krab_cli.workflows.executor import build_agent_prompt
+
+        prompt = build_agent_prompt("Enrich this spec", mode="enrich")
+        assert "## Instructions" in prompt
+        assert "IN-PLACE" in prompt
+        assert "pt-BR" in prompt
+        assert "placeholders" in prompt
+
+    def test_build_agent_prompt_default_mode(self):
+        """Default mode must produce implementation instructions (backward compat)."""
+        from krab_cli.workflows.executor import build_agent_prompt
+
+        prompt = build_agent_prompt("Implement feature")
+        assert "## Instructions" in prompt
+        assert "Follow the specification" in prompt
+        assert "Gherkin scenarios as tests" in prompt
+        # Must NOT contain enrich-specific content
+        assert "IN-PLACE" not in prompt
+        assert "pt-BR" not in prompt
+
+    def test_run_agent_detects_enrich_mode(self):
+        """Dry-run with enrich-spec step should appear in output."""
+        wf = Workflow(
+            name="dry-enrich",
+            steps=[
+                WorkflowStep(
+                    name="enrich-spec",
+                    type=StepType.AGENT,
+                    agent="claude",
+                    prompt="[mode:enrich]Rewrite the spec",
+                ),
+            ],
+        )
+        wr = WorkflowRunner(spec="auth", dry_run=True)
+        result = wr.run(wf)
+        assert result.success
+        assert "enrich-spec" in result.steps[0].step_name
+        assert "claude" in result.steps[0].output
 
 
 # ═══════════════════════════════════════════════════════════════════════════

@@ -16,6 +16,7 @@ SDD_DIR = ".sdd"
 MEMORY_FILE = "memory.json"
 SKILLS_FILE = "skills.json"
 HISTORY_FILE = "history.json"
+SPECS_DIR = ".sdd/specs"
 
 
 @dataclass

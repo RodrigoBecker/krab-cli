@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import ClassVar
 
-from krab_cli.memory import MemoryStore
+from krab_cli.memory import SPECS_DIR, MemoryStore
 
 
 @dataclass
@@ -71,7 +71,7 @@ def collect_context(root: Path | None = None) -> AgentContext:
             )
 
     # Discover spec files
-    for pattern in ["spec.*.md", "specs/*.md", "docs/specs/*.md"]:
+    for pattern in [f"{SPECS_DIR}/spec.*.md", "spec.*.md", "specs/*.md", "docs/specs/*.md"]:
         for f in glob.glob(str(root / pattern)):
             ctx.spec_files.append(str(Path(f).relative_to(root)))
 
@@ -254,8 +254,8 @@ class ClaudeCodeGenerator(AgentGenerator):
         sections.append(
             "## SDD Workflow\n\n"
             "This project uses Spec-Driven Development. Before implementing:\n"
-            "1. Read the relevant `spec.task.*.md` for Gherkin scenarios\n"
-            "2. Check `spec.architecture.*.md` for design constraints\n"
+            "1. Read the relevant `.sdd/specs/spec.task.*.md` for Gherkin scenarios\n"
+            "2. Check `.sdd/specs/spec.architecture.*.md` for design constraints\n"
             "3. Run `krab analyze risk <spec>` to check hallucination risk\n"
             "4. After changes, run `krab optimize run <spec>` to keep specs lean"
         )
@@ -324,7 +324,7 @@ class CopilotGenerator(AgentGenerator):
             instructions.append(
                 "This project uses Spec-Driven Development (SDD). "
                 "Feature specs use Gherkin format (Given/When/Then). "
-                "Check spec.task.*.md files for detailed requirements before implementing features."
+                "Check .sdd/specs/spec.task.*.md files for detailed requirements before implementing features."
             )
 
         # Skills as context
@@ -342,7 +342,7 @@ class CopilotGenerator(AgentGenerator):
         if ctx.spec_files:
             spec_instructions = (
                 "---\n"
-                'applyTo: "spec.*.md"\n'
+                'applyTo: ".sdd/specs/spec.*.md"\n'
                 "---\n\n"
                 "These are SDD specification files using Spec-Driven Development methodology.\n\n"
                 "When editing specs:\n"
@@ -478,12 +478,12 @@ class CodexGenerator(AgentGenerator):
                 "---\n"
                 "name: krab-workflow\n"
                 "description: Use SDD specs before implementing features. "
-                "Read spec.task.*.md for Gherkin scenarios, "
-                "spec.architecture.*.md for design decisions.\n"
+                "Read .sdd/specs/spec.task.*.md for Gherkin scenarios, "
+                ".sdd/specs/spec.architecture.*.md for design decisions.\n"
                 "---\n\n"
                 "# SDD Workflow Skill\n\n"
                 "Before implementing any feature:\n\n"
-                "1. Find the relevant spec file: `ls spec.*.md`\n"
+                "1. Find the relevant spec file: `ls .sdd/specs/spec.*.md`\n"
                 "2. Read the spec thoroughly\n"
                 "3. Follow Gherkin scenarios as test cases\n"
                 "4. After implementation, run: `krab analyze risk <spec>`\n"

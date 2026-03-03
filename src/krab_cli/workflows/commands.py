@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from krab_cli.workflows import Workflow
+    from krab_cli.workflows import Workflow, WorkflowStep
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────
@@ -52,8 +52,85 @@ def _build_context_block(root: Path) -> str:
         return ""
 
 
+def _parse_agent_prompt(raw_prompt: str) -> tuple[str, str]:
+    """Parse an agent step prompt, extracting mode prefix if present.
+
+    Returns (mode, clean_prompt) where mode is "implement" by default
+    or the value from a ``[mode:<value>]`` prefix.
+    """
+    mode = "implement"
+    prompt = raw_prompt
+    if prompt.startswith("[mode:"):
+        end = prompt.index("]")
+        mode = prompt[6:end]
+        prompt = prompt[end + 1:].strip()
+    return mode, prompt
+
+
+def _agent_step_to_markdown(
+    index: int,
+    step: WorkflowStep,
+) -> list[str]:
+    """Render an agent step as detailed markdown instructions.
+
+    Instead of truncating the prompt to 80 chars, this emits:
+    - A summary line identifying the agent and mode
+    - The full task prompt so the AI agent has complete instructions
+    - Mode-specific guidance (e.g. enrich → rewrite rules)
+    """
+    mode, clean_prompt = _parse_agent_prompt(step.prompt)
+    agent_label = step.agent or "default"
+    lines: list[str] = []
+
+    if mode == "enrich":
+        lines.append(
+            f"{index}. **Agent** ({agent_label}) — **Enrich spec** (rewrite in-place):"
+        )
+        lines.append(f"   > {clean_prompt}")
+        lines.append("")
+        lines.append("   **Enrich rules for the agent:**")
+        lines.append("   - Read the spec file indicated above")
+        lines.append(
+            "   - Rewrite the file **IN-PLACE**, keeping the heading structure"
+        )
+        lines.append(
+            "   - Replace **ALL** placeholders "
+            "(`<!-- ... -->`, `<tipo de usuário>`, `<ação desejada>`, etc.) "
+            "with real, specific content"
+        )
+        lines.append(
+            "   - Use the project context (tech_stack, conventions) "
+            "to generate relevant content"
+        )
+        lines.append(
+            "   - Write concrete Gherkin scenarios for the described feature"
+        )
+        lines.append(
+            "   - Generate real acceptance criteria and relevant technical notes"
+        )
+        lines.append("   - Write in **pt-BR**")
+    else:
+        lines.append(f"{index}. **Agent** ({agent_label}) — **{mode.capitalize()}**:")
+        lines.append(f"   > {clean_prompt}")
+        lines.append("")
+        lines.append("   **Instructions for the agent:**")
+        lines.append("   - Follow the specification above precisely")
+        lines.append("   - Implement all Gherkin scenarios as tests")
+        lines.append("   - Respect project conventions and constraints")
+        lines.append(
+            "   - Run existing tests after changes to verify nothing breaks"
+        )
+
+    return lines
+
+
 def _workflow_to_steps_markdown(wf: Workflow) -> str:
-    """Convert workflow steps into numbered markdown instructions."""
+    """Convert workflow steps into numbered markdown instructions.
+
+    Agent steps are expanded with their full prompt and mode-specific
+    instructions so that external AI agents (Copilot, Claude Code) have
+    all the context they need to execute the task.
+    """
     lines: list[str] = []
     for i, step in enumerate(wf.steps, 1):
         step_type = step.type.value
@@ -64,8 +141,7 @@ def _workflow_to_steps_markdown(wf: Workflow) -> str:
         elif step_type == "shell":
             lines.append(f"{i}. **Shell**: `{step.command}`")
         elif step_type == "agent":
-            prompt_preview = step.prompt[:80] + "..." if len(step.prompt) > 80 else step.prompt
-            lines.append(f"{i}. **Agent** ({step.agent or 'default'}): {prompt_preview}")
+            lines.extend(_agent_step_to_markdown(i, step))
         elif step_type == "prompt":
             lines.append(f"{i}. **Prompt user**: {step.prompt}")
         else:

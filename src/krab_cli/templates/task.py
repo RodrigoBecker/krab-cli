@@ -175,8 +175,8 @@ Entity {{
 
 ### Specs Relacionadas
 <!-- Links para specs que esta feature depende -->
-- [ ] `spec.architecture.*.md` — <!-- qual aspecto -->
-- [ ] `spec.task.*.md` — <!-- qual feature -->
+- [ ] `.sdd/specs/spec.architecture.*.md` — <!-- qual aspecto -->
+- [ ] `.sdd/specs/spec.task.*.md` — <!-- qual feature -->
 
 ### Serviços Externos
 <!-- APIs, bancos, filas que esta feature consome -->

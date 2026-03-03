@@ -103,8 +103,8 @@ class PlanTemplate(SpecTemplate):
 
 ### Specs de Arquitetura Referenciadas
 <!-- Links para specs.architecture que sustentam este plano -->
-- `spec.architecture.*.md` — <!-- qual aspecto utilizado -->
-- `spec.architecture.*.md` — <!-- qual aspecto utilizado -->
+- `.sdd/specs/spec.architecture.*.md` — <!-- qual aspecto utilizado -->
+- `.sdd/specs/spec.architecture.*.md` — <!-- qual aspecto utilizado -->
 
 ### Componentes Afetados
 | Componente | Impacto | Tipo de Mudança |

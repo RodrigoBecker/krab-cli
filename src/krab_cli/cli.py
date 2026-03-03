@@ -1244,7 +1244,7 @@ def spec_new(
 
     content = template.render(ctx)
     filename = output or Path(template.suggested_filename(ctx))
-
+    filename.parent.mkdir(parents=True, exist_ok=True)
     filename.write_text(content, encoding="utf-8")
 
     # Record in history
@@ -1289,7 +1289,10 @@ def spec_refine(
     template = get_template("refining")
     content = template.render(ctx)
 
-    out_file = output or Path(f"spec.refining.{file.stem}.md")
+    from krab_cli.memory import SPECS_DIR
+
+    out_file = output or Path(f"{SPECS_DIR}/spec.refining.{file.stem}.md")
+    out_file.parent.mkdir(parents=True, exist_ok=True)
     out_file.write_text(content, encoding="utf-8")
 
     # Show summary
