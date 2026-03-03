@@ -84,6 +84,7 @@ def build_agent_prompt(
     task_prompt: str,
     spec_path: str = "",
     root: Path | None = None,
+    mode: str = "implement",
 ) -> str:
     """Build a structured prompt for an agent from spec + memory context.
 
@@ -91,6 +92,10 @@ def build_agent_prompt(
     - Project context from .sdd/memory.json (if available)
     - Spec file content (if spec_path points to a real file)
     - The task-specific prompt from the workflow step
+
+    Args:
+        mode: "implement" (default) for implementation instructions,
+              "enrich" for spec rewrite instructions.
     """
     root = root or Path.cwd()
     sections: list[str] = []
@@ -137,14 +142,28 @@ def build_agent_prompt(
     if task_prompt:
         sections.append(f"## Task\n\n{task_prompt}")
 
-    # 4. Implementation instructions
-    sections.append(
-        "## Instructions\n\n"
-        "- Follow the specification above precisely\n"
-        "- Implement all Gherkin scenarios as tests\n"
-        "- Respect project conventions and constraints\n"
-        "- Run existing tests after changes to verify nothing breaks"
-    )
+    # 4. Instructions (mode-dependent)
+    if mode == "enrich":
+        sections.append(
+            "## Instructions\n\n"
+            "- Leia o arquivo spec indicado acima\n"
+            "- Reescreva o arquivo IN-PLACE mantendo a estrutura de headings\n"
+            "- Substitua TODOS os placeholders (<!-- ... -->, <tipo de usuário>, "
+            "<ação desejada>, etc.) por conteúdo real e específico\n"
+            "- Use o contexto do projeto (tech_stack, conventions) para gerar "
+            "conteúdo relevante\n"
+            "- Escreva cenários Gherkin concretos para a feature descrita\n"
+            "- Gere critérios de aceitação reais e notas técnicas relevantes\n"
+            "- Escreva em pt-BR"
+        )
+    else:
+        sections.append(
+            "## Instructions\n\n"
+            "- Follow the specification above precisely\n"
+            "- Implement all Gherkin scenarios as tests\n"
+            "- Respect project conventions and constraints\n"
+            "- Run existing tests after changes to verify nothing breaks"
+        )
 
     return "\n\n".join(sections)
 
@@ -170,6 +189,7 @@ class AgentExecutor:
         agent_name: str,
         task_prompt: str,
         step_name: str = "agent",
+        mode: str = "implement",
     ) -> StepResult:
         """Execute a task with the specified agent."""
         if agent_name not in AGENTS:
@@ -195,6 +215,7 @@ class AgentExecutor:
             task_prompt=task_prompt,
             spec_path=self.spec_path,
             root=self.root,
+            mode=mode,
         )
 
         dispatch = {

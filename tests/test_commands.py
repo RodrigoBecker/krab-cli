@@ -119,6 +119,53 @@ class TestHelpers:
         assert "**Shell**" in md
         assert "uv run pytest" in md
         assert "On failure: continue" in md
+        # Agent step should include the FULL prompt, not truncated
+        assert "Implement the feature described in the specification." in md
+        # Agent step should include mode-specific instructions
+        assert "Follow the specification" in md
+
+    def test_workflow_to_steps_markdown_enrich_mode(self):
+        from krab_cli.workflows.commands import _workflow_to_steps_markdown
+
+        wf = Workflow(
+            name="enrich-test",
+            steps=[
+                WorkflowStep(
+                    name="enrich",
+                    type=StepType.AGENT,
+                    agent="claude",
+                    prompt=(
+                        "[mode:enrich]Leia o arquivo spec.md e reescreva "
+                        "substituindo todos os placeholders."
+                    ),
+                ),
+            ],
+        )
+        md = _workflow_to_steps_markdown(wf)
+        # Should NOT contain raw [mode:enrich] prefix
+        assert "[mode:enrich]" not in md
+        # Should contain enrich-specific instructions
+        assert "Enrich spec" in md
+        assert "IN-PLACE" in md
+        assert "placeholders" in md
+        assert "pt-BR" in md
+        assert "Gherkin" in md
+        # Should contain the full clean prompt
+        assert "Leia o arquivo spec.md" in md
+
+    def test_parse_agent_prompt_with_mode(self):
+        from krab_cli.workflows.commands import _parse_agent_prompt
+
+        mode, prompt = _parse_agent_prompt("[mode:enrich]Rewrite the spec")
+        assert mode == "enrich"
+        assert prompt == "Rewrite the spec"
+
+    def test_parse_agent_prompt_without_mode(self):
+        from krab_cli.workflows.commands import _parse_agent_prompt
+
+        mode, prompt = _parse_agent_prompt("Implement the feature")
+        assert mode == "implement"
+        assert prompt == "Implement the feature"
 
     def test_extract_krab_commands(self, sample_workflow):
         from krab_cli.workflows.commands import _extract_krab_commands
@@ -198,6 +245,33 @@ class TestClaudeCommands:
         files = generate_claude_commands(sample_workflows, tmp_path)
         # 1 router + 2 per-workflow
         assert len(files) == 3
+
+    def test_enrich_workflow_has_full_prompt(self, tmp_path):
+        """Claude command for spec-create must include full enrich instructions."""
+        from krab_cli.workflows.builtins import get_builtin
+        from krab_cli.workflows.commands import generate_claude_commands
+
+        wf = get_builtin("spec-create")
+        files = generate_claude_commands([wf], tmp_path)
+        # Per-workflow command (index 1, after router)
+        content = files[1][1]
+        # Must contain enrich-specific instructions, not truncated
+        assert "IN-PLACE" in content
+        assert "pt-BR" in content
+        assert "Gherkin" in content
+        # Must NOT contain raw mode prefix
+        assert "[mode:enrich]" not in content
+
+    def test_implement_workflow_has_full_agent_prompt(self, tmp_path):
+        """Claude command for implement must include full agent instructions."""
+        from krab_cli.workflows.builtins import get_builtin
+        from krab_cli.workflows.commands import generate_claude_commands
+
+        wf = get_builtin("implement")
+        files = generate_claude_commands([wf], tmp_path)
+        content = files[1][1]
+        assert "Implement the feature described in the specification" in content
+        assert "Follow the specification" in content
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -281,6 +355,37 @@ class TestCopilotFiles:
         files = generate_copilot_files(sample_workflows, tmp_path)
         # 1 agent + 2 prompts + 2 skills = 5
         assert len(files) == 5
+
+    def test_enrich_workflow_prompt_has_full_instructions(self, tmp_path):
+        """Copilot prompt for spec-create must include full enrich instructions."""
+        from krab_cli.workflows.builtins import get_builtin
+        from krab_cli.workflows.commands import generate_copilot_files
+
+        wf = get_builtin("spec-create")
+        files = generate_copilot_files([wf], tmp_path)
+        # Find the prompt file for spec-create
+        prompt_files = [(p, c) for p, c in files if "prompt.md" in str(p)]
+        assert len(prompt_files) > 0
+        content = prompt_files[0][1]
+        # Must contain enrich-specific instructions
+        assert "IN-PLACE" in content
+        assert "pt-BR" in content
+        assert "Gherkin" in content
+        # Must NOT contain raw mode prefix
+        assert "[mode:enrich]" not in content
+
+    def test_enrich_workflow_skill_has_full_instructions(self, tmp_path):
+        """Copilot skill for spec-create must include full enrich instructions."""
+        from krab_cli.workflows.builtins import get_builtin
+        from krab_cli.workflows.commands import generate_copilot_files
+
+        wf = get_builtin("spec-create")
+        files = generate_copilot_files([wf], tmp_path)
+        skill_files = [(p, c) for p, c in files if "SKILL.md" in str(p)]
+        assert len(skill_files) > 0
+        content = skill_files[0][1]
+        assert "IN-PLACE" in content
+        assert "[mode:enrich]" not in content
 
 
 # ═══════════════════════════════════════════════════════════════════════════

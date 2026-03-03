@@ -63,7 +63,7 @@ class TestTaskTemplate:
     def test_suggested_filename(self):
         ctx = TemplateContext(name="User Login")
         template = get_template("task")
-        assert template.suggested_filename(ctx) == "spec.task.user-login.md"
+        assert template.suggested_filename(ctx) == ".sdd/specs/spec.task.user-login.md"
 
 
 class TestArchitectureTemplate:

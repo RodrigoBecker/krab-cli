@@ -294,8 +294,22 @@ class WorkflowRunner:
         agent_name = step.agent or context.get("agent", workflow.default_agent)
         resolved_prompt = resolve_variables(step.prompt, context)
 
-        executor = AgentExecutor(root=self.root, spec_path=self.spec)
-        return executor.execute(agent_name, resolved_prompt, step.name)
+        # Detect [mode:<value>] prefix in prompt
+        mode = "implement"
+        if resolved_prompt.startswith("[mode:"):
+            end = resolved_prompt.index("]")
+            mode = resolved_prompt[6:end]
+            resolved_prompt = resolved_prompt[end + 1:]
+
+        # In enrich mode, ensure spec_path has .md extension
+        spec_path = self.spec
+        if mode == "enrich" and spec_path and not spec_path.endswith(".md"):
+            from krab_cli.memory import SPECS_DIR
+
+            spec_path = f"{SPECS_DIR}/spec.task.{spec_path}.md"
+
+        executor = AgentExecutor(root=self.root, spec_path=spec_path)
+        return executor.execute(agent_name, resolved_prompt, step.name, mode=mode)
 
     def _run_prompt(self, step: WorkflowStep, context: dict[str, str]) -> StepResult:
         resolved = resolve_variables(step.prompt, context)

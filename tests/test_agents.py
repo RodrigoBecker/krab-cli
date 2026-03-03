@@ -54,8 +54,10 @@ class TestCollectContext:
         assert ctx.commands["lint"] == "npm run lint"
 
     def test_discovers_spec_files(self, tmp_path):
-        (tmp_path / "spec.task.auth.md").write_text("# Auth spec")
-        (tmp_path / "spec.architecture.api.md").write_text("# API arch")
+        specs_dir = tmp_path / ".sdd" / "specs"
+        specs_dir.mkdir(parents=True)
+        (specs_dir / "spec.task.auth.md").write_text("# Auth spec")
+        (specs_dir / "spec.architecture.api.md").write_text("# API arch")
         ctx = collect_context(tmp_path)
         assert len(ctx.spec_files) >= 2
 
@@ -97,12 +99,12 @@ class TestClaudeCodeGenerator:
 
     def test_includes_progressive_disclosure(self, tmp_path):
         ctx = AgentContext(
-            spec_files=["spec.task.auth.md", "spec.architecture.api.md"],
+            spec_files=[".sdd/specs/spec.task.auth.md", ".sdd/specs/spec.architecture.api.md"],
         )
         gen = ClaudeCodeGenerator()
         files = gen.generate(ctx, tmp_path)
         _, content = files[0]
-        assert "spec.task.auth.md" in content
+        assert ".sdd/specs/spec.task.auth.md" in content
         assert "Read these" in content or "requirements" in content.lower()
 
     def test_includes_commands(self, tmp_path):
@@ -147,7 +149,7 @@ class TestCopilotGenerator:
 
     def test_generates_path_specific_for_specs(self, tmp_path):
         ctx = AgentContext(
-            spec_files=["spec.task.auth.md"],
+            spec_files=[".sdd/specs/spec.task.auth.md"],
         )
         gen = CopilotGenerator()
         files = gen.generate(ctx, tmp_path)
@@ -171,7 +173,7 @@ class TestCopilotGenerator:
         assert all(len(line) < 500 for line in lines)
 
     def test_writes_files(self, tmp_path):
-        ctx = AgentContext(project_name="Test", spec_files=["spec.task.md"])
+        ctx = AgentContext(project_name="Test", spec_files=[".sdd/specs/spec.task.md"])
         gen = CopilotGenerator()
         gen.write(ctx, tmp_path)
         assert (tmp_path / ".github" / "copilot-instructions.md").exists()
@@ -213,7 +215,7 @@ class TestCodexGenerator:
 
     def test_generates_skill(self, tmp_path):
         ctx = AgentContext(
-            spec_files=["spec.task.auth.md"],
+            spec_files=[".sdd/specs/spec.task.auth.md"],
         )
         gen = CodexGenerator()
         files = gen.generate(ctx, tmp_path)
@@ -225,7 +227,7 @@ class TestCodexGenerator:
         assert "krab analyze risk" in skill_content
 
     def test_writes_files(self, tmp_path):
-        ctx = AgentContext(project_name="Test", spec_files=["spec.md"])
+        ctx = AgentContext(project_name="Test", spec_files=[".sdd/specs/spec.md"])
         gen = CodexGenerator()
         gen.write(ctx, tmp_path)
         assert (tmp_path / "AGENTS.md").exists()

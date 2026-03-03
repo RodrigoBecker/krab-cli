@@ -12,7 +12,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
-from krab_cli.memory import MemoryStore, ProjectMemory  # noqa: TC001
+from krab_cli.memory import SPECS_DIR, MemoryStore, ProjectMemory
 
 
 @dataclass
@@ -48,7 +48,7 @@ class SpecTemplate(ABC):
 
     def suggested_filename(self, ctx: TemplateContext) -> str:
         """Suggest a filename for the generated spec."""
-        return f"spec.{self.template_type}.{ctx.slug}{self.file_suffix}"
+        return f"{SPECS_DIR}/spec.{self.template_type}.{ctx.slug}{self.file_suffix}"
 
     def _header(self, ctx: TemplateContext) -> str:
         """Generate standard YAML front-matter header."""

@@ -35,14 +35,30 @@ def _spec_create() -> Workflow:
                 command='spec new task -n "{spec}"',
             ),
             WorkflowStep(
+                name="enrich-spec",
+                type=StepType.AGENT,
+                agent="{agent}",
+                prompt=(
+                    "[mode:enrich]"
+                    "Leia o arquivo .sdd/specs/spec.task.{spec}.md que acabou de ser criado. "
+                    "Ele contém um template com placeholders genéricos. "
+                    "Reescreva o arquivo IN-PLACE substituindo TODOS os placeholders "
+                    "(<!-- ... -->, <tipo de usuário>, <ação desejada>, etc.) "
+                    "com conteúdo real e específico para a feature '{spec}'. "
+                    "Use o contexto do projeto e a descrição da feature para gerar "
+                    "cenários Gherkin concretos, critérios de aceitação reais, "
+                    "e notas técnicas relevantes para a stack do projeto."
+                ),
+            ),
+            WorkflowStep(
                 name="refine-spec",
                 type=StepType.KRAB,
-                command="spec refine spec.task.{spec}.md",
+                command="spec refine .sdd/specs/spec.task.{spec}.md",
             ),
             WorkflowStep(
                 name="analyze-risk",
                 type=StepType.KRAB,
-                command="analyze risk spec.task.{spec}.md",
+                command="analyze risk .sdd/specs/spec.task.{spec}.md",
                 on_failure=OnFailure.CONTINUE,
             ),
             WorkflowStep(
@@ -145,20 +161,36 @@ def _full_cycle() -> Workflow:
                 command='spec new task -n "{spec}"',
             ),
             WorkflowStep(
+                name="enrich-spec",
+                type=StepType.AGENT,
+                agent="{agent}",
+                prompt=(
+                    "[mode:enrich]"
+                    "Leia o arquivo .sdd/specs/spec.task.{spec}.md que acabou de ser criado. "
+                    "Ele contém um template com placeholders genéricos. "
+                    "Reescreva o arquivo IN-PLACE substituindo TODOS os placeholders "
+                    "(<!-- ... -->, <tipo de usuário>, <ação desejada>, etc.) "
+                    "com conteúdo real e específico para a feature '{spec}'. "
+                    "Use o contexto do projeto e a descrição da feature para gerar "
+                    "cenários Gherkin concretos, critérios de aceitação reais, "
+                    "e notas técnicas relevantes para a stack do projeto."
+                ),
+            ),
+            WorkflowStep(
                 name="refine-spec",
                 type=StepType.KRAB,
-                command="spec refine spec.task.{spec}.md",
+                command="spec refine .sdd/specs/spec.task.{spec}.md",
             ),
             WorkflowStep(
                 name="risk-analysis",
                 type=StepType.KRAB,
-                command="analyze risk spec.task.{spec}.md",
+                command="analyze risk .sdd/specs/spec.task.{spec}.md",
                 on_failure=OnFailure.CONTINUE,
             ),
             WorkflowStep(
                 name="optimize-spec",
                 type=StepType.KRAB,
-                command="optimize run spec.task.{spec}.md",
+                command="optimize run .sdd/specs/spec.task.{spec}.md",
                 on_failure=OnFailure.CONTINUE,
             ),
             WorkflowStep(
