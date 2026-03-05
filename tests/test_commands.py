@@ -450,10 +450,10 @@ class TestGenerateAll:
         from krab_cli.workflows.commands import generate_all
 
         results = generate_all(root=tmp_path, workflow="implement")
-        # Claude: 1 router + 1 workflow command = 2
-        assert len(results["claude"]) == 2
-        # Copilot: 1 agent + 1 prompt + 1 skill = 3
-        assert len(results["copilot"]) == 3
+        # Claude: 1 router + 1 workflow command + 11 CLI slash commands = 13
+        assert len(results["claude"]) == 13
+        # Copilot: 1 agent + 1 prompt + 1 skill + 11 CLI slash commands = 14
+        assert len(results["copilot"]) == 14
 
     def test_unknown_agent_raises(self, tmp_path):
         from krab_cli.workflows.commands import generate_all

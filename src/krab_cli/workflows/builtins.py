@@ -303,6 +303,141 @@ def _agent_init() -> Workflow:
     )
 
 
+def _sdd_lifecycle() -> Workflow:
+    """Complete SDD lifecycle: Spec Plan → Spec Refining → Spec Task → Spec Implementation → Spec Review.
+
+    This is the default workflow created during `krab init`. It follows the full
+    spec-driven development cycle where each phase builds on the previous one.
+    """
+    return Workflow(
+        name="sdd-lifecycle",
+        description=(
+            "Complete SDD lifecycle: "
+            "Spec Plan → Spec Refining → Spec Task → Spec Implementation → Spec Review"
+        ),
+        default_agent="claude",
+        steps=[
+            # ── Phase 1: Spec Plan ──────────────────────────────────
+            WorkflowStep(
+                name="check-constitution",
+                type=StepType.GATE,
+                condition="file_exists:{root}/.sdd/specs/spec.constitution.constituicao-do-projeto.md",
+            ),
+            WorkflowStep(
+                name="create-plan-spec",
+                type=StepType.KRAB,
+                command='spec new plan -n "{spec}"',
+            ),
+            WorkflowStep(
+                name="enrich-plan",
+                type=StepType.AGENT,
+                agent="{agent}",
+                prompt=(
+                    "[mode:enrich]"
+                    "Leia o arquivo .sdd/specs/spec.plan.{spec}.md que acabou de ser criado. "
+                    "Leia tambem a Constituicao do projeto em .sdd/specs/spec.constitution.*.md "
+                    "e os GuardRails em .sdd/specs/spec.guardrails.*.md. "
+                    "Reescreva o plano IN-PLACE com fases, milestones e dependencias reais "
+                    "para a feature '{spec}'. Use o contexto do projeto para gerar um plano "
+                    "concreto e executavel."
+                ),
+            ),
+            # ── Phase 2: Spec Refining ──────────────────────────────
+            WorkflowStep(
+                name="create-task-spec",
+                type=StepType.KRAB,
+                command='spec new task -n "{spec}"',
+            ),
+            WorkflowStep(
+                name="enrich-task",
+                type=StepType.AGENT,
+                agent="{agent}",
+                prompt=(
+                    "[mode:enrich]"
+                    "Leia o arquivo .sdd/specs/spec.task.{spec}.md que acabou de ser criado. "
+                    "Leia tambem o plano em .sdd/specs/spec.plan.{spec}.md e a Constituicao. "
+                    "Reescreva a spec de task IN-PLACE substituindo TODOS os placeholders "
+                    "(<!-- ... -->, <tipo de usuario>, <acao desejada>, etc.) "
+                    "com conteudo real e especifico para a feature '{spec}'. "
+                    "Gere cenarios Gherkin concretos, criterios de aceitacao reais, "
+                    "e notas tecnicas relevantes para a stack do projeto."
+                ),
+            ),
+            WorkflowStep(
+                name="refine-spec",
+                type=StepType.KRAB,
+                command="spec refine .sdd/specs/spec.task.{spec}.md",
+            ),
+            # ── Phase 3: Spec Task (Validation) ─────────────────────
+            WorkflowStep(
+                name="risk-analysis",
+                type=StepType.KRAB,
+                command="analyze risk .sdd/specs/spec.task.{spec}.md",
+                on_failure=OnFailure.CONTINUE,
+            ),
+            WorkflowStep(
+                name="ambiguity-check",
+                type=StepType.KRAB,
+                command="analyze ambiguity .sdd/specs/spec.task.{spec}.md",
+                on_failure=OnFailure.CONTINUE,
+            ),
+            WorkflowStep(
+                name="optimize-spec",
+                type=StepType.KRAB,
+                command="optimize run .sdd/specs/spec.task.{spec}.md",
+                on_failure=OnFailure.CONTINUE,
+            ),
+            # ── Phase 4: Spec Implementation ────────────────────────
+            WorkflowStep(
+                name="sync-agents",
+                type=StepType.KRAB,
+                command="agent sync all",
+                on_failure=OnFailure.CONTINUE,
+            ),
+            WorkflowStep(
+                name="implement",
+                type=StepType.AGENT,
+                agent="{agent}",
+                prompt=(
+                    "Implement the feature described in the specification "
+                    ".sdd/specs/spec.task.{spec}.md. "
+                    "Follow ALL Gherkin scenarios as acceptance criteria. "
+                    "Respect the project's Constitution and GuardRails. "
+                    "Create or update tests to match the scenarios. "
+                    "Follow the conventions defined in the project memory."
+                ),
+            ),
+            WorkflowStep(
+                name="run-tests",
+                type=StepType.SHELL,
+                command="uv run pytest",
+                on_failure=OnFailure.CONTINUE,
+            ),
+            # ── Phase 5: Spec Review ────────────────────────────────
+            WorkflowStep(
+                name="review",
+                type=StepType.AGENT,
+                agent="{agent}",
+                prompt=(
+                    "Review the implementation against the specification "
+                    ".sdd/specs/spec.task.{spec}.md. "
+                    "Verify ALL Gherkin scenarios are covered by tests. "
+                    "Check conformity with the project's Constitution and GuardRails. "
+                    "Report any deviations, missing edge cases, or spec violations. "
+                    "Suggest updates to related specs if needed."
+                ),
+                on_failure=OnFailure.CONTINUE,
+            ),
+            WorkflowStep(
+                name="final-lint",
+                type=StepType.SHELL,
+                command="uv run ruff check src/ tests/",
+                on_failure=OnFailure.CONTINUE,
+            ),
+        ],
+    )
+
+
 # ─── Registry ────────────────────────────────────────────────────────────
 
 _BUILTIN_FACTORIES: dict[str, Callable[[], Workflow]] = {
@@ -312,6 +447,7 @@ _BUILTIN_FACTORIES: dict[str, Callable[[], Workflow]] = {
     "full-cycle": _full_cycle,
     "verify": _verify,
     "agent-init": _agent_init,
+    "sdd-lifecycle": _sdd_lifecycle,
 }
 
 

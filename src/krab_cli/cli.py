@@ -83,6 +83,253 @@ def main(
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# INIT command — Project setup wizard
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+AGENT_CHOICES = {
+    "claude": "Claude Code (Anthropic) — CLAUDE.md + .claude/commands/",
+    "copilot": "GitHub Copilot — .github/copilot-instructions.md + agents/prompts/skills",
+    "codex": "OpenAI Codex — AGENTS.md + .agents/skills/",
+}
+
+ARCHITECTURE_CHOICES = [
+    "monolith",
+    "microservices",
+    "hexagonal",
+    "clean-architecture",
+    "event-driven",
+    "serverless",
+    "modular-monolith",
+]
+
+
+@app.command("init")
+def init_project(
+    name: Annotated[str, typer.Option("--name", "-n", help="Project name")] = "",
+    agent: Annotated[str, typer.Option("--agent", "-a", help="Agent: claude, copilot, codex")] = "",
+    skip_wizard: Annotated[
+        bool, typer.Option("--skip-wizard", help="Skip interactive wizard")
+    ] = False,
+) -> None:
+    """Initialize a new SDD project with agent selection and full setup wizard.
+
+    This is the entry point for any new project. It will:
+    1. Select the AI agent (Claude Code, Copilot, or Codex)
+    2. Set up project memory (name, description, stack, conventions)
+    3. Generate global specs (Constitution, GuardRails, Runbook)
+    4. Create the default SDD lifecycle workflow
+    5. Generate agent instruction files and slash commands
+    """
+    from rich.panel import Panel
+    from rich.table import Table
+
+    from krab_cli.memory import MemoryStore
+    from krab_cli.utils.display import (
+        get_console,
+        print_error,
+        print_header,
+        print_info,
+        print_success,
+        print_warning,
+    )
+
+    console = get_console()
+    print_header("Krab SDD Project Setup", "Interactive wizard")
+
+    store = MemoryStore()
+    if store.is_initialized:
+        print_warning("Projeto ja inicializado em .sdd/")
+        overwrite = typer.confirm("Deseja reinicializar? (dados existentes serao preservados)")
+        if not overwrite:
+            raise typer.Exit()
+
+    # ── Step 1: Agent Selection ──────────────────────────────────────
+    console.print("\n[bold cyan]Step 1/5[/bold cyan] — Selecione o agente de IA\n")
+
+    if not agent:
+        if skip_wizard:
+            agent = "claude"
+        else:
+            table = Table(show_header=True, border_style="cyan", title="Agentes Disponiveis")
+            table.add_column("#", style="dim", width=4)
+            table.add_column("Agent", style="bold yellow", min_width=12)
+            table.add_column("Descricao")
+
+            agent_keys = list(AGENT_CHOICES.keys())
+            for i, (key, desc) in enumerate(AGENT_CHOICES.items(), 1):
+                table.add_row(str(i), key, desc)
+            console.print(table)
+            console.print()
+
+            choice = typer.prompt(
+                "Escolha o agente (1-3 ou nome)", default="1"
+            )
+            if choice.isdigit() and 1 <= int(choice) <= len(agent_keys):
+                agent = agent_keys[int(choice) - 1]
+            elif choice.lower() in AGENT_CHOICES:
+                agent = choice.lower()
+            else:
+                print_error(f"Agente invalido: {choice}")
+                raise typer.Exit(code=1)
+
+    if agent not in AGENT_CHOICES:
+        print_error(f"Agente invalido: {agent}. Opcoes: {', '.join(AGENT_CHOICES)}")
+        raise typer.Exit(code=1)
+
+    print_success(f"Agente selecionado: {agent} — {AGENT_CHOICES[agent]}")
+
+    # ── Step 2: Project Memory Setup ─────────────────────────────────
+    console.print("\n[bold cyan]Step 2/5[/bold cyan] — Configuracao do projeto\n")
+
+    if not name:
+        if skip_wizard:
+            name = Path.cwd().name
+        else:
+            name = typer.prompt("Nome do projeto", default=Path.cwd().name)
+
+    description = ""
+    architecture = ""
+    tech_stack: dict[str, str] = {}
+    conventions: dict[str, str] = {}
+
+    if not skip_wizard:
+        description = typer.prompt("Descricao do projeto", default="")
+
+        # Architecture
+        console.print(f"\n[dim]Estilos: {', '.join(ARCHITECTURE_CHOICES)}[/dim]")
+        architecture = typer.prompt("Estilo de arquitetura", default="")
+
+        # Tech stack
+        console.print("\n[dim]Informe a tech stack (vazio para encerrar):[/dim]")
+        while True:
+            key = typer.prompt("  Componente (ex: backend, frontend, database)", default="")
+            if not key:
+                break
+            value = typer.prompt(f"  Tecnologia para {key}")
+            tech_stack[key] = value
+
+        # Conventions
+        console.print("\n[dim]Convencoes do projeto (vazio para encerrar):[/dim]")
+        while True:
+            key = typer.prompt("  Convencao (ex: naming, testing, git)", default="")
+            if not key:
+                break
+            value = typer.prompt(f"  Regra para {key}")
+            conventions[key] = value
+
+    # Initialize memory
+    memory = store.init(
+        project_name=name,
+        description=description,
+        agent_preference=agent,
+        tech_stack=tech_stack,
+        architecture_style=architecture,
+        conventions=conventions,
+    )
+    print_success(f"Memoria do projeto inicializada: {store.sdd_path}/")
+
+    # ── Step 3: Generate Global Specs ────────────────────────────────
+    console.print("\n[bold cyan]Step 3/5[/bold cyan] — Gerando specs globais\n")
+
+    _generate_global_specs(store, memory)
+    print_success("Specs globais geradas: constitution, guardrails, runbook")
+
+    # ── Step 4: Create Default Workflow ──────────────────────────────
+    console.print("\n[bold cyan]Step 4/5[/bold cyan] — Criando workflow padrao\n")
+
+    from krab_cli.workflows.builtins import get_builtin
+
+    try:
+        wf = get_builtin("sdd-lifecycle")
+        wf_path = store.sdd_path / "workflows" / "sdd-lifecycle.yaml"
+        wf.save(wf_path)
+        print_success(f"Workflow padrao criado: {wf_path}")
+    except ValueError:
+        print_info("Workflow sdd-lifecycle sera registrado como built-in")
+
+    # ── Step 5: Generate Agent Files + Slash Commands ────────────────
+    console.print("\n[bold cyan]Step 5/5[/bold cyan] — Gerando arquivos do agente\n")
+
+    try:
+        from krab_cli.agents import sync_agent
+
+        paths = sync_agent(agent)
+        for p in paths:
+            print_success(f"[{agent}] {p}")
+    except Exception as e:
+        print_warning(f"Aviso ao gerar arquivos do agente: {e}")
+
+    # Generate slash commands
+    try:
+        from krab_cli.workflows.commands import generate_all as gen_commands
+
+        cmd_results = gen_commands(root=Path.cwd(), agent=agent)
+        cmd_total = sum(len(v) for v in cmd_results.values())
+        if cmd_total:
+            print_success(f"Gerados {cmd_total} slash commands para {agent}")
+    except Exception:
+        pass
+
+    # ── Summary ──────────────────────────────────────────────────────
+    console.print()
+    summary = Panel(
+        f"[bold green]Projeto '{name}' inicializado com sucesso![/bold green]\n\n"
+        f"  Agente: [yellow]{agent}[/yellow]\n"
+        f"  Workflow: [yellow]sdd-lifecycle[/yellow]\n"
+        f"  Specs globais: [yellow]constitution, guardrails, runbook[/yellow]\n\n"
+        f"[dim]Proximos passos:[/dim]\n"
+        f"  1. Revise as specs globais em .sdd/specs/\n"
+        f"  2. Use [bold]krab spec new task -n 'feature'[/bold] para criar specs\n"
+        f"  3. Use [bold]krab workflow run sdd-lifecycle -s 'feature'[/bold] para executar o ciclo\n"
+        f"  4. Use [bold]krab spec clarify <spec>[/bold] para enriquecer specs com Q&A\n",
+        title="Setup Completo",
+        border_style="green",
+    )
+    console.print(summary)
+
+
+def _generate_global_specs(store, memory) -> None:
+    """Generate the three global spec files: constitution, guardrails, runbook."""
+    import krab_cli.templates.constitution
+    import krab_cli.templates.guardrails
+    import krab_cli.templates.runbook  # noqa: F401
+    from krab_cli.templates import build_context, get_template
+
+    global_specs = {
+        "constitution": "Constituicao do Projeto",
+        "guardrails": "GuardRails do Projeto",
+        "runbook": "Runbook do Projeto",
+    }
+
+    for spec_type, spec_name in global_specs.items():
+        template = get_template(spec_type)
+        ctx = build_context(name=spec_name, description=memory.description, store=store)
+        content = template.render(ctx)
+
+        filename = Path(template.suggested_filename(ctx))
+        filename.parent.mkdir(parents=True, exist_ok=True)
+        filename.write_text(content, encoding="utf-8")
+
+        # Track in memory
+        memory.global_specs[spec_type] = str(filename)
+
+        # Record in history
+        if store.is_initialized:
+            store.add_history_entry(
+                {
+                    "action": "spec_new",
+                    "template": spec_type,
+                    "name": spec_name,
+                    "file": str(filename),
+                }
+            )
+
+    # Save updated memory with global_specs paths
+    store.save_memory(memory)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # OPTIMIZE commands
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -1223,8 +1470,12 @@ def spec_new(
     """Generate a new spec from a template."""
     # Import all templates to trigger registration
     import krab_cli.templates.architecture
+    import krab_cli.templates.clarify
+    import krab_cli.templates.constitution
+    import krab_cli.templates.guardrails
     import krab_cli.templates.plan
     import krab_cli.templates.refining
+    import krab_cli.templates.runbook
     import krab_cli.templates.skill
     import krab_cli.templates.task  # noqa: F401
     from krab_cli.memory import MemoryStore
@@ -1319,6 +1570,127 @@ def spec_refine(
     print_success(f"Refinamento salvo: {out_file}")
 
 
+@spec_app.command("clarify")
+def spec_clarify(
+    file: Annotated[Path, typer.Argument(help="Spec file to clarify")],
+    output: Annotated[Path | None, typer.Option("--output", "-o")] = None,
+    interactive: Annotated[
+        bool, typer.Option("--interactive", "-i", help="Interactive Q&A mode")
+    ] = True,
+    agent_mode: Annotated[
+        bool, typer.Option("--agent", help="Generate Q&A for agent consumption (non-interactive)")
+    ] = False,
+) -> None:
+    """Clarify a spec with interactive Q&A to enrich its content.
+
+    Analyzes the spec, generates targeted questions, and (in interactive mode)
+    prompts you to answer them. Answers are saved as a clarify document that
+    can be used by agents to rewrite the spec with richer content.
+    """
+    import krab_cli.templates.clarify  # noqa: F401
+    from krab_cli.memory import MemoryStore
+    from krab_cli.templates import build_context, get_template
+    from krab_cli.templates.clarify import generate_clarify_questions
+    from krab_cli.utils.display import (
+        get_console,
+        print_header,
+        print_info,
+        print_success,
+        print_warning,
+    )
+
+    _check_file(file)
+    source_text = file.read_text(encoding="utf-8")
+
+    print_header("Spec Clarify (Q&A)", file.name)
+
+    session = generate_clarify_questions(source_text, spec_file=str(file))
+    console = get_console()
+
+    print_info(f"Tipo detectado: spec.{session.spec_type}")
+    print_info(f"Perguntas geradas: {session.total_questions}")
+
+    if not session.questions:
+        print_success("Spec ja esta bem detalhada! Nenhuma pergunta gerada.")
+        return
+
+    # Interactive mode — ask questions and record answers
+    if interactive and not agent_mode:
+        console.print("\n[bold]Responda as perguntas para enriquecer a spec:[/bold]")
+        console.print("[dim]Pressione Enter sem texto para pular uma pergunta[/dim]\n")
+
+        priority_order = session.by_priority()
+        for i, q in enumerate(priority_order, 1):
+            priority_icon = {
+                "critical": "[bold red][!!][/bold red]",
+                "high": "[red][!][/red]",
+                "medium": "[yellow][~][/yellow]",
+                "low": "[dim][.][/dim]",
+            }.get(q.priority, "[-]")
+
+            console.print(
+                f"\n  {priority_icon} [{i}/{len(priority_order)}] "
+                f"[bold]{q.section}[/bold]\n"
+                f"  {q.question}"
+            )
+
+            try:
+                answer = input("  > ").strip()
+                if answer:
+                    q.answer = answer
+                    q.answered = True
+                    console.print("  [green]Registrado[/green]")
+                else:
+                    console.print("  [dim]Pulado[/dim]")
+            except (EOFError, KeyboardInterrupt):
+                print_warning("\nSessao interrompida. Salvando respostas parciais...")
+                break
+
+        print_info(
+            f"Respondidas: {session.answered_count}/{session.total_questions} "
+            f"({session.completion_pct:.0f}%)"
+        )
+
+    # Generate output document
+    store = MemoryStore()
+    ctx = build_context(
+        name=file.stem,
+        description=f"Clarify de {file.name}",
+        store=store,
+        extra={"session": session, "source_text": source_text},
+    )
+
+    template = get_template("clarify")
+    content = template.render(ctx)
+
+    from krab_cli.memory import SPECS_DIR
+
+    out_file = output or Path(f"{SPECS_DIR}/spec.clarify.{file.stem}.md")
+    out_file.parent.mkdir(parents=True, exist_ok=True)
+    out_file.write_text(content, encoding="utf-8")
+
+    # Record in history
+    if store.is_initialized:
+        store.add_history_entry(
+            {
+                "action": "spec_clarify",
+                "template": "clarify",
+                "name": file.stem,
+                "file": str(out_file),
+                "answered": session.answered_count,
+                "total": session.total_questions,
+            }
+        )
+
+    print_success(f"Documento de clarify salvo: {out_file}")
+
+    if session.answered_count > 0:
+        console.print(
+            "\n[dim]Proximo passo: use o agente para incorporar as respostas na spec:[/dim]\n"
+            f"  krab workflow run spec-create -s \"{file.stem}\" --agent claude\n"
+        )
+
+
 @spec_app.command("list")
 def spec_list() -> None:
     """List all available spec templates."""
@@ -1326,8 +1698,12 @@ def spec_list() -> None:
 
     # Import all templates to trigger registration
     import krab_cli.templates.architecture
+    import krab_cli.templates.clarify
+    import krab_cli.templates.constitution
+    import krab_cli.templates.guardrails
     import krab_cli.templates.plan
     import krab_cli.templates.refining
+    import krab_cli.templates.runbook
     import krab_cli.templates.skill
     import krab_cli.templates.task  # noqa: F401
     from krab_cli.templates import list_templates

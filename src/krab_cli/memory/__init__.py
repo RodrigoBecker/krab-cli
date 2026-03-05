@@ -86,6 +86,9 @@ class ProjectMemory:
     integrations: list[str] = field(default_factory=list)
     constraints: list[str] = field(default_factory=list)
     decisions: list[ArchitectureDecision] = field(default_factory=list)
+    agent_preference: str = ""  # claude, copilot, codex
+    default_workflow: str = "sdd-lifecycle"  # default workflow to use
+    global_specs: dict[str, str] = field(default_factory=dict)  # type -> filepath
     created_at: str = ""
     updated_at: str = ""
 
@@ -99,6 +102,8 @@ class ProjectMemory:
             parts.append(f"Description: {self.description}")
         if self.architecture_style:
             parts.append(f"Architecture: {self.architecture_style}")
+        if self.agent_preference:
+            parts.append(f"Agent: {self.agent_preference}")
 
         if self.tech_stack:
             stack_str = ", ".join(f"{k}: {v}" for k, v in self.tech_stack.items())
@@ -128,14 +133,29 @@ class MemoryStore:
     def is_initialized(self) -> bool:
         return self.sdd_path.exists()
 
-    def init(self, project_name: str = "", description: str = "") -> ProjectMemory:
+    def init(
+        self,
+        project_name: str = "",
+        description: str = "",
+        agent_preference: str = "",
+        tech_stack: dict[str, str] | None = None,
+        architecture_style: str = "",
+        conventions: dict[str, str] | None = None,
+    ) -> ProjectMemory:
         """Initialize .sdd/ directory with default memory."""
         self.sdd_path.mkdir(parents=True, exist_ok=True)
+        # Create subdirectories for specs and workflows
+        (self.sdd_path / "specs").mkdir(exist_ok=True)
+        (self.sdd_path / "workflows").mkdir(exist_ok=True)
 
         now = datetime.now(tz=UTC).isoformat()
         memory = ProjectMemory(
             project_name=project_name,
             description=description,
+            agent_preference=agent_preference,
+            tech_stack=tech_stack or {},
+            architecture_style=architecture_style,
+            conventions=conventions or {},
             created_at=now,
             updated_at=now,
         )

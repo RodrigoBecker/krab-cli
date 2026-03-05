@@ -604,7 +604,8 @@ class TestBuiltinWorkflows:
         assert "full-cycle" in names
         assert "verify" in names
         assert "agent-init" in names
-        assert len(builtins) == 6
+        assert "sdd-lifecycle" in names
+        assert len(builtins) == 7
 
     def test_get_builtin(self):
         from krab_cli.workflows.builtins import get_builtin
@@ -623,7 +624,7 @@ class TestBuiltinWorkflows:
         from krab_cli.workflows.builtins import get_all_builtins
 
         all_wfs = get_all_builtins()
-        assert len(all_wfs) == 6
+        assert len(all_wfs) == 7
         assert all(isinstance(w, Workflow) for w in all_wfs.values())
 
     def test_all_builtins_have_valid_steps(self):

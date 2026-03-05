@@ -1,11 +1,14 @@
 """Slash Command Generator — Transforms krab workflows into native agent commands.
 
 Generates native slash command files for each AI coding agent:
-  - Claude Code:  .claude/commands/*.md  (/project:krab-implement)
+  - Claude Code:  .claude/commands/*.md  (/project:krab-implement, /project:krab-spec, etc.)
   - Copilot:      .github/agents/*.agent.md (@krab)
                   .github/prompts/*.prompt.md (/krab-implement)
                   .github/skills/*/SKILL.md (auto-loaded)
   - Cross-agent:  .github/skills/*/SKILL.md (Agent Skills standard)
+
+Also generates CLI-to-slash-command mappings so all krab commands are
+accessible natively within each agent's interface.
 """
 
 from __future__ import annotations
@@ -426,6 +429,183 @@ def generate_cross_agent_skills(
     return files
 
 
+# ─── CLI-to-Slash Command Mappings ──────────────────────────────────────
+
+# All krab CLI commands that should be exposed as slash commands
+_CLI_COMMANDS: list[dict[str, str]] = [
+    {
+        "name": "spec-new",
+        "cli": "krab spec new {type} -n {name}",
+        "description": "Create a new spec from template (task, architecture, plan, constitution, guardrails, runbook, clarify)",
+        "prompt_hint": "Template type and spec name (e.g. 'task user-auth')",
+    },
+    {
+        "name": "spec-refine",
+        "cli": "krab spec refine {spec}",
+        "description": "Analyze a spec with Tree-of-Thought and generate refinement plan",
+        "prompt_hint": "Path to spec file",
+    },
+    {
+        "name": "spec-clarify",
+        "cli": "krab spec clarify {spec}",
+        "description": "Interactive Q&A to enrich and clarify a spec",
+        "prompt_hint": "Path to spec file",
+    },
+    {
+        "name": "spec-import",
+        "cli": "krab spec import {source}",
+        "description": "Import specs from a remote Git repository",
+        "prompt_hint": "Git repo URL or registry alias",
+    },
+    {
+        "name": "analyze-risk",
+        "cli": "krab analyze risk {spec}",
+        "description": "Assess hallucination risk score for a spec",
+        "prompt_hint": "Path to spec file",
+    },
+    {
+        "name": "analyze-ambiguity",
+        "cli": "krab analyze ambiguity {spec}",
+        "description": "Detect vague/ambiguous terms that increase hallucination risk",
+        "prompt_hint": "Path to spec file",
+    },
+    {
+        "name": "optimize",
+        "cli": "krab optimize run {spec}",
+        "description": "Optimize a spec for token efficiency",
+        "prompt_hint": "Path to spec file",
+    },
+    {
+        "name": "memory-show",
+        "cli": "krab memory show",
+        "description": "Show current project memory (stack, conventions, etc.)",
+        "prompt_hint": "",
+    },
+    {
+        "name": "memory-set",
+        "cli": "krab memory set {key} {value}",
+        "description": "Set a memory field (e.g. tech_stack.backend, conventions.naming)",
+        "prompt_hint": "Key and value (e.g. 'tech_stack.backend Python')",
+    },
+    {
+        "name": "agent-sync",
+        "cli": "krab agent sync {target}",
+        "description": "Generate instruction files for AI agents (all, claude, copilot, codex)",
+        "prompt_hint": "Target agent (all, claude, copilot, codex)",
+    },
+    {
+        "name": "workflow-run",
+        "cli": "krab workflow run {name} --spec {spec}",
+        "description": "Execute a workflow pipeline (sdd-lifecycle, spec-create, implement, review)",
+        "prompt_hint": "Workflow name and spec (e.g. 'sdd-lifecycle user-auth')",
+    },
+]
+
+
+def _generate_cli_slash_command_claude(cmd: dict[str, str], root: Path) -> str:
+    """Generate a Claude Code slash command for a krab CLI command."""
+    ctx = _build_context_block(root)
+
+    prompt_section = ""
+    if cmd["prompt_hint"]:
+        prompt_section = f"""
+## User Input
+
+```text
+$ARGUMENTS
+```
+
+You **MUST** consider the user input before proceeding (if not empty).
+Parse `$ARGUMENTS` to extract: {cmd['prompt_hint']}
+"""
+    else:
+        prompt_section = """
+## User Input
+
+```text
+$ARGUMENTS
+```
+"""
+
+    return f"""---
+description: "Krab CLI: {cmd['description']}"
+---
+{prompt_section}
+{ctx}## Command
+
+Run this krab CLI command in the terminal:
+
+```bash
+{cmd['cli']}
+```
+
+## Instructions
+
+1. Parse `$ARGUMENTS` to fill in the command parameters.
+2. Run the krab command in the terminal.
+3. Read and interpret the output.
+4. If the command generates a spec file, read it and offer to enrich it with project context.
+5. If the command shows analysis results, summarize findings and suggest improvements.
+6. For spec creation commands, after creating the spec, offer to run `krab spec clarify` to enrich it.
+"""
+
+
+def _generate_cli_slash_command_copilot(cmd: dict[str, str], root: Path) -> str:
+    """Generate a Copilot prompt for a krab CLI command."""
+    ctx = _build_context_block(root)
+
+    input_var = ""
+    if cmd["prompt_hint"]:
+        input_var = f"\nInput: ${{input:args:{cmd['prompt_hint']}}}\n"
+
+    return f"""---
+agent: 'agent'
+description: "Krab CLI: {cmd['description']}"
+---
+{input_var}
+{ctx}## Command
+
+Run this command in the terminal:
+
+```bash
+{cmd['cli']}
+```
+
+## Instructions
+
+1. Fill in command parameters from user input.
+2. Run the command in the terminal.
+3. Interpret the output and summarize results.
+4. Suggest next steps based on the output.
+"""
+
+
+def generate_cli_commands_claude(root: Path) -> list[tuple[Path, str]]:
+    """Generate Claude Code slash commands for all krab CLI commands."""
+    commands_dir = root / ".claude" / "commands"
+    files: list[tuple[Path, str]] = []
+
+    for cmd in _CLI_COMMANDS:
+        filename = f"krab-{cmd['name']}.md"
+        content = _generate_cli_slash_command_claude(cmd, root)
+        files.append((commands_dir / filename, content))
+
+    return files
+
+
+def generate_cli_commands_copilot(root: Path) -> list[tuple[Path, str]]:
+    """Generate Copilot prompt files for all krab CLI commands."""
+    prompts_dir = root / ".github" / "prompts"
+    files: list[tuple[Path, str]] = []
+
+    for cmd in _CLI_COMMANDS:
+        filename = f"krab-{cmd['name']}.prompt.md"
+        content = _generate_cli_slash_command_copilot(cmd, root)
+        files.append((prompts_dir / filename, content))
+
+    return files
+
+
 # ─── Public API ──────────────────────────────────────────────────────────
 
 
@@ -437,15 +617,22 @@ def generate_all(
     """Generate native slash commands for all (or filtered) agents and workflows.
 
     Returns a dict of agent_name -> list of written file paths.
+    Also generates CLI-to-slash-command mappings for each agent.
     """
     root = root or Path.cwd()
     workflows = _get_workflows(workflow)
 
     results: dict[str, list[Path]] = {}
 
-    generators: dict[str, object] = {
+    generators = {
         "claude": generate_claude_commands,
         "copilot": generate_copilot_files,
+    }
+
+    # CLI command generators (per agent)
+    cli_generators = {
+        "claude": generate_cli_commands_claude,
+        "copilot": generate_cli_commands_copilot,
     }
 
     # Filter by agent if specified
@@ -455,6 +642,7 @@ def generate_all(
             msg = f"Unknown agent: '{agent}'. Available: {available}"
             raise ValueError(msg)
         generators = {agent: generators[agent]}
+        cli_generators = {k: v for k, v in cli_generators.items() if k == agent}
 
     for agent_name, gen_fn in generators.items():
         files = gen_fn(workflows, root)
@@ -463,6 +651,16 @@ def generate_all(
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(content, encoding="utf-8")
             written.append(path)
+
+        # Also generate CLI slash commands
+        cli_gen = cli_generators.get(agent_name)
+        if cli_gen:
+            cli_files = cli_gen(root)
+            for path, content in cli_files:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(content, encoding="utf-8")
+                written.append(path)
+
         results[agent_name] = written
 
     return results
@@ -482,7 +680,7 @@ def preview(
 
     results: dict[str, list[tuple[Path, str]]] = {}
 
-    generators: dict[str, object] = {
+    generators = {
         "claude": generate_claude_commands,
         "copilot": generate_copilot_files,
     }
