@@ -763,3 +763,325 @@ class TestSpecRegistryModel:
 
         with pytest.raises(ValueError, match="nao encontrado"):
             store.remove_registry("nope")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Spec Archive
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestSpecArchive:
+    def test_archive_by_path(self, tmp_path):
+        """Archive a spec using its full path."""
+        os.chdir(tmp_path)
+        store = MemoryStore(tmp_path)
+        store.init(project_name="Test")
+
+        spec_file = tmp_path / ".sdd" / "specs" / "spec.task.feature.md"
+        spec_file.write_text("# Feature\n")
+
+        result = runner.invoke(
+            app, ["spec", "archive", str(spec_file), "--force"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+        assert not spec_file.exists()
+        assert (tmp_path / ".sdd" / "archived" / "spec.task.feature.md").exists()
+
+    def test_archive_by_name_in_specs_dir(self, tmp_path):
+        """Archive a spec by filename looked up in .sdd/specs/."""
+        os.chdir(tmp_path)
+        store = MemoryStore(tmp_path)
+        store.init(project_name="Test")
+
+        spec_file = tmp_path / ".sdd" / "specs" / "spec.task.auth.md"
+        spec_file.write_text("# Auth\n")
+
+        result = runner.invoke(
+            app, ["spec", "archive", "spec.task.auth.md", "--force"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+        assert not spec_file.exists()
+        assert (tmp_path / ".sdd" / "archived" / "spec.task.auth.md").exists()
+
+    def test_archive_by_short_name(self, tmp_path):
+        """Archive a spec using short name (auto-prefixed with spec. and .md)."""
+        os.chdir(tmp_path)
+        store = MemoryStore(tmp_path)
+        store.init(project_name="Test")
+
+        spec_file = tmp_path / ".sdd" / "specs" / "spec.task.login.md"
+        spec_file.write_text("# Login\n")
+
+        result = runner.invoke(
+            app, ["spec", "archive", "task.login", "--force"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+        assert not spec_file.exists()
+        assert (tmp_path / ".sdd" / "archived" / "spec.task.login.md").exists()
+
+    def test_archive_creates_archived_dir(self, tmp_path):
+        """Archived directory is created if it doesn't exist."""
+        os.chdir(tmp_path)
+        store = MemoryStore(tmp_path)
+        store.init(project_name="Test")
+
+        archived_dir = tmp_path / ".sdd" / "archived"
+        assert not archived_dir.exists()
+
+        spec_file = tmp_path / ".sdd" / "specs" / "spec.task.x.md"
+        spec_file.write_text("# X\n")
+
+        result = runner.invoke(
+            app, ["spec", "archive", str(spec_file), "--force"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+        assert archived_dir.exists()
+
+    def test_archive_updates_global_specs(self, tmp_path):
+        """Archiving a global spec removes it from memory.global_specs."""
+        os.chdir(tmp_path)
+        store = MemoryStore(tmp_path)
+        store.init(project_name="Test")
+
+        spec_file = tmp_path / ".sdd" / "specs" / "spec.constitution.md"
+        spec_file.write_text("# Constitution\n")
+
+        memory = store.load_memory()
+        memory.global_specs["constitution"] = str(spec_file)
+        store.save_memory(memory)
+
+        result = runner.invoke(
+            app, ["spec", "archive", str(spec_file), "--force"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+
+        memory = store.load_memory()
+        assert "constitution" not in memory.global_specs
+
+    def test_archive_records_history(self, tmp_path):
+        """Archiving records an entry in history."""
+        os.chdir(tmp_path)
+        store = MemoryStore(tmp_path)
+        store.init(project_name="Test")
+
+        spec_file = tmp_path / ".sdd" / "specs" / "spec.task.hist.md"
+        spec_file.write_text("# Hist\n")
+
+        runner.invoke(
+            app, ["spec", "archive", str(spec_file), "--force"],
+            catch_exceptions=False,
+        )
+
+        history = store.load_history()
+        archive_entries = [h for h in history if h["action"] == "spec_archive"]
+        assert len(archive_entries) == 1
+        assert "spec.task.hist.md" in archive_entries[0]["file"]
+
+    def test_archive_multiple_specs(self, tmp_path):
+        """Archive multiple specs at once."""
+        os.chdir(tmp_path)
+        store = MemoryStore(tmp_path)
+        store.init(project_name="Test")
+
+        specs_dir = tmp_path / ".sdd" / "specs"
+        (specs_dir / "spec.task.a.md").write_text("# A\n")
+        (specs_dir / "spec.task.b.md").write_text("# B\n")
+
+        result = runner.invoke(
+            app,
+            ["spec", "archive", str(specs_dir / "spec.task.a.md"),
+             str(specs_dir / "spec.task.b.md"), "--force"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+        assert not (specs_dir / "spec.task.a.md").exists()
+        assert not (specs_dir / "spec.task.b.md").exists()
+        archived_dir = tmp_path / ".sdd" / "archived"
+        assert (archived_dir / "spec.task.a.md").exists()
+        assert (archived_dir / "spec.task.b.md").exists()
+
+    def test_archive_not_found(self, tmp_path):
+        """Error when no matching spec is found."""
+        os.chdir(tmp_path)
+        store = MemoryStore(tmp_path)
+        store.init(project_name="Test")
+
+        result = runner.invoke(
+            app, ["spec", "archive", "nonexistent.md", "--force"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 1
+
+    def test_archive_handles_name_conflict(self, tmp_path):
+        """Handles naming conflict when spec already exists in archived/."""
+        os.chdir(tmp_path)
+        store = MemoryStore(tmp_path)
+        store.init(project_name="Test")
+
+        archived_dir = tmp_path / ".sdd" / "archived"
+        archived_dir.mkdir(parents=True)
+        (archived_dir / "spec.task.dup.md").write_text("# Old archived\n")
+
+        spec_file = tmp_path / ".sdd" / "specs" / "spec.task.dup.md"
+        spec_file.write_text("# New version\n")
+
+        result = runner.invoke(
+            app, ["spec", "archive", str(spec_file), "--force"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+        assert not spec_file.exists()
+        # Original archived is preserved, new one gets a suffix
+        assert (archived_dir / "spec.task.dup.md").exists()
+        assert (archived_dir / "spec.task.dup.1.md").exists()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Spec Delete
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestSpecDelete:
+    def test_delete_by_path(self, tmp_path):
+        """Delete a spec using its full path."""
+        os.chdir(tmp_path)
+        store = MemoryStore(tmp_path)
+        store.init(project_name="Test")
+
+        spec_file = tmp_path / ".sdd" / "specs" / "spec.task.feature.md"
+        spec_file.write_text("# Feature\n")
+
+        result = runner.invoke(
+            app, ["spec", "delete", str(spec_file), "--force"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+        assert not spec_file.exists()
+
+    def test_delete_by_name_in_specs_dir(self, tmp_path):
+        """Delete a spec by filename looked up in .sdd/specs/."""
+        os.chdir(tmp_path)
+        store = MemoryStore(tmp_path)
+        store.init(project_name="Test")
+
+        spec_file = tmp_path / ".sdd" / "specs" / "spec.task.auth.md"
+        spec_file.write_text("# Auth\n")
+
+        result = runner.invoke(
+            app, ["spec", "delete", "spec.task.auth.md", "--force"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+        assert not spec_file.exists()
+
+    def test_delete_by_short_name(self, tmp_path):
+        """Delete a spec using short name."""
+        os.chdir(tmp_path)
+        store = MemoryStore(tmp_path)
+        store.init(project_name="Test")
+
+        spec_file = tmp_path / ".sdd" / "specs" / "spec.task.login.md"
+        spec_file.write_text("# Login\n")
+
+        result = runner.invoke(
+            app, ["spec", "delete", "task.login", "--force"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+        assert not spec_file.exists()
+
+    def test_delete_from_archived(self, tmp_path):
+        """Delete a spec from .sdd/archived/ directory."""
+        os.chdir(tmp_path)
+        store = MemoryStore(tmp_path)
+        store.init(project_name="Test")
+
+        archived_dir = tmp_path / ".sdd" / "archived"
+        archived_dir.mkdir(parents=True)
+        spec_file = archived_dir / "spec.task.old.md"
+        spec_file.write_text("# Old\n")
+
+        result = runner.invoke(
+            app, ["spec", "delete", "spec.task.old.md", "--force"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+        assert not spec_file.exists()
+
+    def test_delete_multiple_specs(self, tmp_path):
+        """Delete multiple specs at once."""
+        os.chdir(tmp_path)
+        store = MemoryStore(tmp_path)
+        store.init(project_name="Test")
+
+        specs_dir = tmp_path / ".sdd" / "specs"
+        (specs_dir / "spec.task.a.md").write_text("# A\n")
+        (specs_dir / "spec.task.b.md").write_text("# B\n")
+
+        result = runner.invoke(
+            app,
+            ["spec", "delete", str(specs_dir / "spec.task.a.md"),
+             str(specs_dir / "spec.task.b.md"), "--force"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+        assert not (specs_dir / "spec.task.a.md").exists()
+        assert not (specs_dir / "spec.task.b.md").exists()
+
+    def test_delete_updates_global_specs(self, tmp_path):
+        """Deleting a global spec removes it from memory.global_specs."""
+        os.chdir(tmp_path)
+        store = MemoryStore(tmp_path)
+        store.init(project_name="Test")
+
+        spec_file = tmp_path / ".sdd" / "specs" / "spec.guardrails.md"
+        spec_file.write_text("# GuardRails\n")
+
+        memory = store.load_memory()
+        memory.global_specs["guardrails"] = str(spec_file)
+        store.save_memory(memory)
+
+        result = runner.invoke(
+            app, ["spec", "delete", str(spec_file), "--force"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+
+        memory = store.load_memory()
+        assert "guardrails" not in memory.global_specs
+
+    def test_delete_records_history(self, tmp_path):
+        """Deleting records an entry in history."""
+        os.chdir(tmp_path)
+        store = MemoryStore(tmp_path)
+        store.init(project_name="Test")
+
+        spec_file = tmp_path / ".sdd" / "specs" / "spec.task.hist.md"
+        spec_file.write_text("# Hist\n")
+
+        runner.invoke(
+            app, ["spec", "delete", str(spec_file), "--force"],
+            catch_exceptions=False,
+        )
+
+        history = store.load_history()
+        delete_entries = [h for h in history if h["action"] == "spec_delete"]
+        assert len(delete_entries) == 1
+        assert "spec.task.hist.md" in delete_entries[0]["file"]
+
+    def test_delete_not_found(self, tmp_path):
+        """Error when no matching spec is found."""
+        os.chdir(tmp_path)
+        store = MemoryStore(tmp_path)
+        store.init(project_name="Test")
+
+        result = runner.invoke(
+            app, ["spec", "delete", "nonexistent.md", "--force"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 1

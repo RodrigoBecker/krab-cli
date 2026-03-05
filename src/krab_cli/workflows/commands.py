@@ -458,6 +458,18 @@ _CLI_COMMANDS: list[dict[str, str]] = [
         "prompt_hint": "Git repo URL or registry alias",
     },
     {
+        "name": "spec-archive",
+        "cli": "krab spec archive {specs}",
+        "description": "Archive specs by moving them to .sdd/archived/",
+        "prompt_hint": "Spec file paths or names to archive (e.g. 'spec.task.user-auth.md')",
+    },
+    {
+        "name": "spec-delete",
+        "cli": "krab spec delete {specs}",
+        "description": "Delete one or more spec files permanently",
+        "prompt_hint": "Spec file paths or names to delete (e.g. 'spec.task.old-feature.md')",
+    },
+    {
         "name": "analyze-risk",
         "cli": "krab analyze risk {spec}",
         "description": "Assess hallucination risk score for a spec",

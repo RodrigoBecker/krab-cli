@@ -140,7 +140,10 @@ def init_project(
     store = MemoryStore()
     if store.is_initialized:
         print_warning("Projeto ja inicializado em .sdd/")
-        overwrite = typer.confirm("Deseja reinicializar? (dados existentes serao preservados)")
+        overwrite = typer.confirm(
+            "Deseja reinicializar? (dados existentes serao preservados)",
+            default=False,
+        )
         if not overwrite:
             raise typer.Exit()
 
@@ -163,7 +166,7 @@ def init_project(
             console.print()
 
             choice = typer.prompt(
-                "Escolha o agente (1-3 ou nome)", default="1"
+                "Escolha o agente (1-3 ou nome) [Enter=claude]", default="1"
             )
             if choice.isdigit() and 1 <= int(choice) <= len(agent_keys):
                 agent = agent_keys[int(choice) - 1]
@@ -186,7 +189,9 @@ def init_project(
         if skip_wizard:
             name = Path.cwd().name
         else:
-            name = typer.prompt("Nome do projeto", default=Path.cwd().name)
+            name = typer.prompt(
+                f"Nome do projeto [Enter={Path.cwd().name}]", default=Path.cwd().name
+            )
 
     description = ""
     architecture = ""
@@ -194,29 +199,31 @@ def init_project(
     conventions: dict[str, str] = {}
 
     if not skip_wizard:
-        description = typer.prompt("Descricao do projeto", default="")
+        description = typer.prompt("Descricao do projeto [Enter=pular]", default="")
 
         # Architecture
         console.print(f"\n[dim]Estilos: {', '.join(ARCHITECTURE_CHOICES)}[/dim]")
-        architecture = typer.prompt("Estilo de arquitetura", default="")
+        architecture = typer.prompt("Estilo de arquitetura [Enter=pular]", default="")
 
         # Tech stack
-        console.print("\n[dim]Informe a tech stack (vazio para encerrar):[/dim]")
+        console.print("\n[dim]Informe a tech stack (Enter para pular/encerrar):[/dim]")
         while True:
-            key = typer.prompt("  Componente (ex: backend, frontend, database)", default="")
+            key = typer.prompt("  Componente (ex: backend, frontend, database) [Enter=pular]", default="")
             if not key:
                 break
-            value = typer.prompt(f"  Tecnologia para {key}")
-            tech_stack[key] = value
+            value = typer.prompt(f"  Tecnologia para {key} [Enter=pular]", default="")
+            if value:
+                tech_stack[key] = value
 
         # Conventions
-        console.print("\n[dim]Convencoes do projeto (vazio para encerrar):[/dim]")
+        console.print("\n[dim]Convencoes do projeto (Enter para pular/encerrar):[/dim]")
         while True:
-            key = typer.prompt("  Convencao (ex: naming, testing, git)", default="")
+            key = typer.prompt("  Convencao (ex: naming, testing, git) [Enter=pular]", default="")
             if not key:
                 break
-            value = typer.prompt(f"  Regra para {key}")
-            conventions[key] = value
+            value = typer.prompt(f"  Regra para {key} [Enter=pular]", default="")
+            if value:
+                conventions[key] = value
 
     # Initialize memory
     memory = store.init(
@@ -1689,6 +1696,248 @@ def spec_clarify(
             "\n[dim]Proximo passo: use o agente para incorporar as respostas na spec:[/dim]\n"
             f"  krab workflow run spec-create -s \"{file.stem}\" --agent claude\n"
         )
+
+
+# ── Spec Archive ─────────────────────────────────────────────────────────
+
+
+@spec_app.command("archive")
+def spec_archive(
+    specs: Annotated[
+        list[str],
+        typer.Argument(help="Spec file paths or names to archive"),
+    ],
+    force: Annotated[
+        bool, typer.Option("--force", "-f", help="Archive without confirmation")
+    ] = False,
+) -> None:
+    """Archive specs by moving them to .sdd/archived/.
+
+    Moves spec files to .sdd/archived/ and updates project references
+    to ignore them. Accepts one or more file paths or spec names.
+    """
+    import shutil
+
+    from krab_cli.memory import MemoryStore
+    from krab_cli.utils.display import (
+        get_console,
+        print_error,
+        print_header,
+        print_info,
+        print_success,
+        print_warning,
+    )
+
+    console = get_console()
+    print_header("Spec Archive", f"{len(specs)} spec(s)")
+
+    store = MemoryStore()
+
+    # Ensure .sdd/archived/ exists
+    archived_dir = store.sdd_path / "archived"
+    archived_dir.mkdir(parents=True, exist_ok=True)
+
+    # Resolve spec paths
+    resolved: list[Path] = []
+    for spec_ref in specs:
+        spec_path = Path(spec_ref)
+        # Try direct path first
+        if spec_path.exists() and spec_path.is_file():
+            resolved.append(spec_path)
+            continue
+        # Try inside .sdd/specs/
+        sdd_path = store.sdd_path / "specs" / spec_ref
+        if sdd_path.exists():
+            resolved.append(sdd_path)
+            continue
+        # Try with spec. prefix
+        if not spec_ref.startswith("spec."):
+            prefixed = store.sdd_path / "specs" / f"spec.{spec_ref}.md"
+            if prefixed.exists():
+                resolved.append(prefixed)
+                continue
+        print_warning(f"Spec nao encontrada: {spec_ref}")
+
+    if not resolved:
+        print_error("Nenhuma spec encontrada para arquivar.")
+        raise typer.Exit(code=1)
+
+    # Show what will be archived
+    from rich.table import Table
+
+    table = Table(show_header=True, border_style="cyan", title="Specs para arquivar")
+    table.add_column("#", style="dim", width=4)
+    table.add_column("Spec", style="bold yellow")
+    table.add_column("Size", style="cyan", justify="right")
+
+    for i, spec_path in enumerate(resolved, 1):
+        size_kb = spec_path.stat().st_size / 1024
+        table.add_row(str(i), spec_path.name, f"{size_kb:.1f} KB")
+    console.print(table)
+
+    if not force:
+        confirm = typer.confirm(
+            f"\nArquivar {len(resolved)} spec(s)?", default=True
+        )
+        if not confirm:
+            raise typer.Exit()
+
+    # Move files to archived/
+    archived_files: list[str] = []
+    for spec_path in resolved:
+        dest = archived_dir / spec_path.name
+        # Handle name conflicts in archived/
+        if dest.exists():
+            stem = dest.stem
+            suffix = dest.suffix
+            counter = 1
+            while dest.exists():
+                dest = archived_dir / f"{stem}.{counter}{suffix}"
+                counter += 1
+        shutil.move(str(spec_path), str(dest))
+        archived_files.append(spec_path.name)
+        print_info(f"  {spec_path.name} -> {dest}")
+
+    # Update memory: remove from global_specs if present
+    if store.is_initialized:
+        memory = store.load_memory()
+        updated = False
+        for spec_name in archived_files:
+            for key, filepath in list(memory.global_specs.items()):
+                if spec_name in filepath:
+                    del memory.global_specs[key]
+                    updated = True
+        if updated:
+            store.save_memory(memory)
+
+        # Record in history
+        for spec_name in archived_files:
+            store.add_history_entry(
+                {
+                    "action": "spec_archive",
+                    "file": spec_name,
+                    "destination": str(archived_dir / spec_name),
+                }
+            )
+
+    print_success(f"Arquivadas {len(archived_files)} spec(s) em {archived_dir}/")
+
+
+# ── Spec Delete ──────────────────────────────────────────────────────────
+
+
+@spec_app.command("delete")
+def spec_delete(
+    specs: Annotated[
+        list[str],
+        typer.Argument(help="Spec file paths or names to delete"),
+    ],
+    force: Annotated[
+        bool, typer.Option("--force", "-f", help="Delete without confirmation")
+    ] = False,
+) -> None:
+    """Delete one or more spec files permanently.
+
+    Accepts file paths or spec names. Will prompt for confirmation
+    unless --force is used.
+    """
+    from krab_cli.memory import MemoryStore
+    from krab_cli.utils.display import (
+        get_console,
+        print_error,
+        print_header,
+        print_info,
+        print_success,
+        print_warning,
+    )
+
+    console = get_console()
+    print_header("Spec Delete", f"{len(specs)} spec(s)")
+
+    store = MemoryStore()
+
+    # Resolve spec paths
+    resolved: list[Path] = []
+    for spec_ref in specs:
+        spec_path = Path(spec_ref)
+        # Try direct path first
+        if spec_path.exists() and spec_path.is_file():
+            resolved.append(spec_path)
+            continue
+        # Try inside .sdd/specs/
+        sdd_path = store.sdd_path / "specs" / spec_ref
+        if sdd_path.exists():
+            resolved.append(sdd_path)
+            continue
+        # Try with spec. prefix
+        if not spec_ref.startswith("spec."):
+            prefixed = store.sdd_path / "specs" / f"spec.{spec_ref}.md"
+            if prefixed.exists():
+                resolved.append(prefixed)
+                continue
+        # Try inside .sdd/archived/
+        archived_path = store.sdd_path / "archived" / spec_ref
+        if archived_path.exists():
+            resolved.append(archived_path)
+            continue
+        print_warning(f"Spec nao encontrada: {spec_ref}")
+
+    if not resolved:
+        print_error("Nenhuma spec encontrada para excluir.")
+        raise typer.Exit(code=1)
+
+    # Show what will be deleted
+    from rich.table import Table
+
+    table = Table(show_header=True, border_style="red", title="Specs para excluir")
+    table.add_column("#", style="dim", width=4)
+    table.add_column("Spec", style="bold red")
+    table.add_column("Location", style="dim")
+    table.add_column("Size", style="cyan", justify="right")
+
+    for i, spec_path in enumerate(resolved, 1):
+        size_kb = spec_path.stat().st_size / 1024
+        table.add_row(str(i), spec_path.name, str(spec_path.parent), f"{size_kb:.1f} KB")
+    console.print(table)
+
+    if not force:
+        confirm = typer.confirm(
+            f"\n[IRREVERSIVEL] Excluir {len(resolved)} spec(s) permanentemente?",
+            default=False,
+        )
+        if not confirm:
+            raise typer.Exit()
+
+    # Delete files
+    deleted_files: list[str] = []
+    for spec_path in resolved:
+        spec_name = spec_path.name
+        spec_path.unlink()
+        deleted_files.append(spec_name)
+        print_info(f"  Excluida: {spec_name}")
+
+    # Update memory: remove from global_specs if present
+    if store.is_initialized:
+        memory = store.load_memory()
+        updated = False
+        for spec_name in deleted_files:
+            for key, filepath in list(memory.global_specs.items()):
+                if spec_name in filepath:
+                    del memory.global_specs[key]
+                    updated = True
+        if updated:
+            store.save_memory(memory)
+
+        # Record in history
+        for spec_name in deleted_files:
+            store.add_history_entry(
+                {
+                    "action": "spec_delete",
+                    "file": spec_name,
+                }
+            )
+
+    print_success(f"Excluidas {len(deleted_files)} spec(s) permanentemente.")
 
 
 @spec_app.command("list")
