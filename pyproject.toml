@@ -1,6 +1,6 @@
 [project]
 name = "krab-cli"
-version = "0.1.0"
+version = "0.2.0"
 description = "Krab CLI — Spec-Driven Development toolkit: optimize, convert, and analyze specs for AI agents"
 readme = "README.md"
 license = { text = "MIT" }
